@@ -1,0 +1,145 @@
+{
+  "repository": "https://github.com/lucide-icons/lucide",
+  "files": [
+    {
+      "path": "folder.svg",
+      "git_blob_sha": "ef69b345f200f1542ad9a2dfca7d41d036910f4b"
+    },
+    {
+      "path": "file.svg",
+      "git_blob_sha": "161be7a29fb7c7b808eb57722fc544231a5aa5e4"
+    },
+    {
+      "path": "search.svg",
+      "git_blob_sha": "03e442a5440cff92c219fe3a3c1f2b0788d30701"
+    },
+    {
+      "path": "plug.svg",
+      "git_blob_sha": "f28b6f0abef77a6e843dfa99f81731332c72db64"
+    },
+    {
+      "path": "settings.svg",
+      "git_blob_sha": "4c6263af909841a3911f41a385021778eacba736"
+    },
+    {
+      "path": "plus.svg",
+      "git_blob_sha": "41f92bb93eb6626368d71c9884127bbcf7d3ccdf"
+    },
+    {
+      "path": "save.svg",
+      "git_blob_sha": "07af0708302018606f9619adb2d4d6ec2175db57"
+    },
+    {
+      "path": "x.svg",
+      "git_blob_sha": "e31794349d3eecea1b3ae8e974b68bb8f4becda7"
+    },
+    {
+      "path": "refresh-cw.svg",
+      "git_blob_sha": "c27b3a9677e35fb2353167b01553d3d4cc4e3091"
+    },
+    {
+      "path": "chevron-right.svg",
+      "git_blob_sha": "db62a0c20181edd6173722b2a483e0b85e30f240"
+    },
+    {
+      "path": "chevron-down.svg",
+      "git_blob_sha": "e70d30b88399a721cd5d20d0d26756608cf8c42b"
+    },
+    {
+      "path": "panel-right.svg",
+      "git_blob_sha": "53ba1e6120eb638530de38ca5b696741dfcaa6ad"
+    },
+    {
+      "path": "command.svg",
+      "git_blob_sha": "69510a926ddf8ef911aea69d0b77f1370ca25c93"
+    },
+    {
+      "path": "diamond.svg",
+      "git_blob_sha": "28756d1d81a8bee5e4a30fcacb1f63e711e77f25"
+    },
+    {
+      "path": "check.svg",
+      "git_blob_sha": "5abe1527434e7b251bde0661f99af96178976d8c"
+    },
+    {
+      "path": "code.svg",
+      "git_blob_sha": "fe2378380d5d57637278b515cd15e9312a053833"
+    },
+    {
+      "path": "arrow-left.svg",
+      "git_blob_sha": "b40bff851c85eff44f678eb7984fc6070d7ea721"
+    },
+    {
+      "path": "info.svg",
+      "git_blob_sha": "2a46eac2b55a1ead226035d1efa8721f6f08bd17"
+    },
+    {
+      "path": "dot.svg",
+      "git_blob_sha": "f79c4b159fa14e5323dbef00fa1ed65631295669"
+    },
+    {
+      "path": "library-big.svg",
+      "git_blob_sha": "5375b947ab375fed3bfaceef892db2b0e566f460"
+    },
+    {
+      "path": "file-text.svg",
+      "git_blob_sha": "67dc5b9d1a07a1b501ba87d62563b914c059096e"
+    },
+    {
+      "path": "file-code.svg",
+      "git_blob_sha": "84c01e1ab7790ce353c5fcabb829d852ac85ea6c"
+    },
+    {
+      "path": "image.svg",
+      "git_blob_sha": "3241134c018d44660a5af9453925118d7a95dae5"
+    },
+    {
+      "path": "file-type.svg",
+      "git_blob_sha": "5634e311284faa52356abb464ae67d0d84acb023"
+    },
+    {
+      "path": "file-archive.svg",
+      "git_blob_sha": "f51fc324370f244babd18bb8ab49bb1231fdfa5c"
+    },
+    {
+      "path": "file-music.svg",
+      "git_blob_sha": "63587a29a7779b193ca99d593acd2463844cc093"
+    },
+    {
+      "path": "file-cog.svg",
+      "git_blob_sha": "06e0aa2f803b7e6df2b8c866ba5c3c42d5fb7939"
+    },
+    {
+      "path": "file-spreadsheet.svg",
+      "git_blob_sha": "8b0b91d4b4c6fb820c436effa22eada8de59ce09"
+    },
+    {
+      "path": "case-sensitive.svg",
+      "git_blob_sha": "522701800907b16e847dcacc8c8ef08b0ab24607"
+    },
+    {
+      "path": "regex.svg",
+      "git_blob_sha": "1b0287b2320e8a646b1b4b16135f357fdda42dd2"
+    },
+    {
+      "path": "arrow-down.svg",
+      "git_blob_sha": "3244b63e3147e5e8b359f20458106bc74572d331"
+    },
+    {
+      "path": "arrow-up.svg",
+      "git_blob_sha": "50a81cb370d77bccdab4e91c1aeff36b763cdfbf"
+    },
+    {
+      "path": "LICENSE",
+      "git_blob_sha": "718bb3f0e44153809972abed31839375804bf652"
+    },
+    {
+      "path": "braces.svg",
+      "git_blob_sha": "d56b1dc17ac22b2323ff04872d6dc7ad86f3d97c"
+    },
+    {
+      "path": "video.svg",
+      "git_blob_sha": "c198f49510f9d0c5af8c5533c32bab607d81abba"
+    }
+  ]
+}

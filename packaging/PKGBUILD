@@ -1,0 +1,51 @@
+# Local source package. Place diamond-0.5.0.tar.gz beside this PKGBUILD.
+pkgname=diamond
+pkgver=0.5.0
+pkgrel=1
+pkgdesc='Native Markdown notes and source editor built with Rust and egui'
+arch=('x86_64')
+license=('MIT')
+depends=('libgcc' 'glibc' 'libx11' 'libxcb' 'libxkbcommon' 'wayland' 'mesa')
+makedepends=('rust' 'cargo' 'pkgconf' 'python')
+optdepends=('xdg-desktop-portal: system file chooser' 'fontconfig: installed font selection' 'noto-fonts-cjk: Chinese glyphs')
+source=("$pkgname-$pkgver.tar.gz")
+# This local archive is created by its owner, not downloaded from a release.
+# Replace SKIP with the result of updpkgsums when distributing the package.
+sha256sums=('SKIP')
+
+prepare() {
+    cd "$srcdir/$pkgname-$pkgver"
+    if [[ ! -f Cargo.lock ]]; then
+        cargo generate-lockfile
+    fi
+    cargo fetch --locked
+    # Normalize this source snapshot in makepkg's extracted build directory.
+    cargo fmt --all
+    if [[ -f "$startdir/diamond2.svg" ]]; then
+        cp -- "$startdir/diamond2.svg" ./diamond2.svg
+    fi
+}
+
+build() {
+    cd "$srcdir/$pkgname-$pkgver"
+    cargo build --release --frozen --package diamond-app
+}
+
+check() {
+    cd "$srcdir/$pkgname-$pkgver"
+    ./scripts/check.sh
+}
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+    install -Dm755 target/release/diamond "$pkgdir/usr/bin/diamond"
+    install -Dm644 packaging/diamond.desktop "$pkgdir/usr/share/applications/diamond.desktop"
+    if [[ -f diamond2.svg ]]; then
+        install -Dm644 diamond2.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/diamond.svg"
+    else
+        install -Dm644 assets/diamond.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/diamond.svg"
+    fi
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 assets/lucide/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LUCIDE"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

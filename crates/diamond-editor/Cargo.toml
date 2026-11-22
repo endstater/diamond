@@ -1,0 +1,15 @@
+[package]
+name = "diamond-editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+syntect.workspace = true
+image.workspace = true
+resvg.workspace = true
+diamond-core.workspace = true
+diamond-document = { path = "../diamond-document" }
+egui.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,27 @@
+[package]
+name = "diamond-app"
+version = "0.5.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "diamond"
+path = "src/main.rs"
+
+[dependencies]
+ureq.workspace = true
+notify.workspace = true
+ashpd.workspace = true
+pollster.workspace = true
+eframe.workspace = true
+egui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+diamond-core.workspace = true
+diamond-vault.workspace = true
+diamond-editor.workspace = true
+diamond-document.workspace = true
+diamond-plugin.workspace = true
+
