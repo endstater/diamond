@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Semantic, source-preserving Markdown with Unicode scalar edit positions.
 
+use std::cell::RefCell;
 use std::ops::Range;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
 
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use thiserror::Error;
@@ -220,8 +226,11 @@ struct State {
 #[derive(Clone, Debug)]
 pub struct Document {
     state: State,
-    undo: Vec<State>,
-    redo: Vec<State>,
+    undo: Vec<Arc<State>>,
+    redo: Vec<Arc<State>>,
+    revision: u64,
+    cached_map: RefCell<Option<Arc<SourceMap>>>,
+    cached_tasks: RefCell<Option<(usize, usize)>>,
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -293,6 +302,9 @@ impl Document {
             },
             undo: Vec::new(),
             redo: Vec::new(),
+            revision: NEXT_REVISION.fetch_add(1, Ordering::Relaxed),
+            cached_map: RefCell::new(None),
+            cached_tasks: RefCell::new(None),
         }
     }
 
@@ -316,7 +328,41 @@ impl Document {
 
     /// A source snapshot and exact block/caret mappings for a live projection.
     pub fn source_map(&self) -> SourceMap {
-        source_map::build(self)
+        self.source_map_shared().as_ref().clone()
+    }
+
+    /// Stable for an unchanged snapshot; clones share cached immutable mappings.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub fn task_progress(&self) -> (usize, usize) {
+        if let Some(progress) = *self.cached_tasks.borrow() {
+            return progress;
+        }
+        let mut done = 0;
+        let mut total = 0;
+        for block in self.blocks() {
+            if let BlockKind::Task(checked) = block.kind {
+                total += 1;
+                done += usize::from(checked);
+            }
+        }
+        let progress = (done, total);
+        *self.cached_tasks.borrow_mut() = Some(progress);
+        progress
+    }
+    pub fn source_map_shared(&self) -> Arc<SourceMap> {
+        if let Some(map) = self.cached_map.borrow().as_ref() {
+            return Arc::clone(map);
+        }
+        let map = Arc::new(source_map::build(self));
+        *self.cached_map.borrow_mut() = Some(Arc::clone(&map));
+        map
+    }
+    fn invalidate_mapping(&mut self) {
+        self.revision = NEXT_REVISION.fetch_add(1, Ordering::Relaxed);
+        *self.cached_map.get_mut() = None;
+        *self.cached_tasks.get_mut() = None;
     }
 
     /// Splice serialized Markdown at Unicode scalar positions and reparse it as
@@ -606,11 +652,31 @@ impl Document {
         Ok(())
     }
 
+    /// Group already validated edits since a clone of this document into one Undo
+    /// step. The current parsed state and byte-exact source map are kept intact.
+    pub fn group_history_since(&mut self, checkpoint: Self) {
+        if self.state == checkpoint.state {
+            *self = checkpoint;
+            return;
+        }
+        let Document { state, undo, .. } = checkpoint;
+        self.undo = undo;
+        if self.undo.len() == HISTORY_LIMIT {
+            self.undo.remove(0);
+        }
+        self.undo.push(Arc::new(state));
+        self.redo.clear();
+    }
+
     pub fn undo(&mut self) -> bool {
         let Some(previous) = self.undo.pop() else {
             return false;
         };
-        self.redo.push(std::mem::replace(&mut self.state, previous));
+        self.redo.push(Arc::new(std::mem::replace(
+            &mut self.state,
+            previous.as_ref().clone(),
+        )));
+        self.invalidate_mapping();
         true
     }
 
@@ -618,7 +684,11 @@ impl Document {
         let Some(next) = self.redo.pop() else {
             return false;
         };
-        self.undo.push(std::mem::replace(&mut self.state, next));
+        self.undo.push(Arc::new(std::mem::replace(
+            &mut self.state,
+            next.as_ref().clone(),
+        )));
+        self.invalidate_mapping();
         true
     }
 
@@ -650,8 +720,9 @@ impl Document {
         if self.undo.len() == HISTORY_LIMIT {
             self.undo.remove(0);
         }
-        self.undo.push(before);
+        self.undo.push(Arc::new(before));
         self.redo.clear();
+        self.invalidate_mapping();
     }
 
     fn validate_serialization(&mut self, before: &State) -> Result<(), DocumentError> {
@@ -1679,5 +1750,83 @@ mod tests {
             document.set_block_kind(0, BlockKind::Heading(0)),
             Err(DocumentError::InvalidHeading)
         );
+    }
+}
+
+#[cfg(test)]
+mod snapshot_cache_tests {
+    use super::*;
+    #[test]
+    fn maps_are_shared_until_a_transaction_including_undo_redo() {
+        let mut doc = Document::parse("# я\n\n- [ ] task\n");
+        let original = doc.to_markdown();
+        let first = doc.source_map_shared();
+        assert!(Arc::ptr_eq(&first, &doc.source_map_shared()));
+        let mut fork = doc.clone();
+        assert!(Arc::ptr_eq(&first, &fork.source_map_shared()));
+        let n = original.chars().count();
+        doc.replace_source_range(n..n, "next\n").unwrap();
+        let changed = doc.source_map_shared();
+        assert!(!Arc::ptr_eq(&first, &changed));
+        assert_eq!(fork.to_markdown(), original);
+        assert!(doc.undo());
+        assert_eq!(doc.source_map_shared().source, original);
+        assert!(doc.redo());
+        assert_eq!(doc.source_map_shared().source, changed.source);
+        fork.replace_source_range(2..3, "你好").unwrap();
+        assert_ne!(fork.source_map_shared().source, first.source);
+    }
+    #[test]
+    fn cloning_history_does_not_duplicate_past_snapshots() {
+        let mut doc = Document::parse("start\n");
+        for _ in 0..8 {
+            let n = doc.to_markdown().chars().count();
+            doc.replace_source_range(n..n, "more\n").unwrap();
+        }
+        let mut fork = doc.clone();
+        assert!(Arc::ptr_eq(&doc.undo[0], &fork.undo[0]));
+        assert!(fork.undo());
+        assert_ne!(fork.to_markdown(), doc.to_markdown());
+        assert!(fork.redo());
+        assert_eq!(fork.to_markdown(), doc.to_markdown());
+    }
+}
+
+#[cfg(test)]
+mod progress_cache_regression {
+    use super::*;
+    #[test]
+    fn task_progress_changes_with_toggle_undo_and_redo() {
+        let mut doc = Document::parse("- [ ] root\n    - [x] child\n");
+        assert_eq!(doc.task_progress(), (1, 2));
+        doc.toggle_task(0).unwrap();
+        assert_eq!(doc.task_progress(), (2, 2));
+        assert!(doc.undo());
+        assert_eq!(doc.task_progress(), (1, 2));
+        assert!(doc.redo());
+        assert_eq!(doc.task_progress(), (2, 2));
+    }
+}
+
+#[cfg(test)]
+mod grouping_cache_test {
+    use super::*;
+    #[test]
+    fn grouping_keeps_the_parsed_source_map_and_creates_one_undo_step() {
+        let input = "я🙂\n";
+        let mut document = Document::parse(input);
+        let checkpoint = document.clone();
+        document.replace_source_range(0..1, "你好").unwrap();
+        document.replace_source_range(2..3, "!").unwrap();
+        let map = document.source_map_shared();
+        let revision = document.revision();
+        document.group_history_since(checkpoint);
+        assert!(Arc::ptr_eq(&map, &document.source_map_shared()));
+        assert_eq!(document.revision(), revision);
+        assert!(document.undo());
+        assert_eq!(document.to_markdown(), input);
+        assert!(!document.undo());
+        assert!(document.redo());
+        assert_eq!(document.to_markdown(), map.source);
     }
 }

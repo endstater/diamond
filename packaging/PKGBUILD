@@ -1,6 +1,6 @@
-# Local source package. Place diamond-0.7.1.tar.gz beside this PKGBUILD.
+# Local source package. Place diamond-0.7.2.tar.gz beside this PKGBUILD.
 pkgname=diamond
-pkgver=0.7.1
+pkgver=0.7.2
 pkgrel=1
 pkgdesc='Native Markdown notes and source editor built with Rust and egui'
 arch=('x86_64')

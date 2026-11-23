@@ -16,7 +16,7 @@ Inspired by the facets and perfection of a cut diamond, the project brings usefu
 - Multiple vaults, collapsible folders, rename and drag-and-drop moves.
 - Syntax highlighting for Rust, Python, TypeScript, Typst and more.
 - Plugins in any language, native split previews, and installation from GitHub or a folder.
-- Dark/light/system themes, custom fonts, accents, scroll speed and color emoji.
+- Dark/light/system themes, custom fonts, HEX accent input, scroll speed and color emoji.
 - English, Russian and Chinese interfaces; a lightweight single-file mode.
 
 ## Run from source

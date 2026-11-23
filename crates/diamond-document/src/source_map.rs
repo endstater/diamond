@@ -11,6 +11,7 @@ use crate::{Block, BlockKind, Document, parser};
 pub struct SourceMap {
     /// Exact Markdown snapshot to which every coordinate in this map refers.
     pub source: String,
+    pub source_scalar_len: usize,
     /// Same order and length as `Document::blocks()`.
     pub blocks: Vec<BlockSourceMap>,
 }
@@ -102,7 +103,11 @@ pub(super) fn build(document: &Document) -> SourceMap {
         });
         semantic_start += semantic_len + 1;
     }
-    SourceMap { source, blocks }
+    SourceMap {
+        source_scalar_len: byte_boundaries.len() - 1,
+        source,
+        blocks,
+    }
 }
 
 struct VisibleMapping {

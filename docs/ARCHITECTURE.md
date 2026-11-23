@@ -157,3 +157,18 @@ commands-list DTO) and keeps commands replies compatible with v1. SVG previews
 accept UTF-8 BOM/comments/XML declarations and scale large vector viewports to
 a bounded 1200-pixel raster; raster input limits and disabled external SVG image
 resolvers remain unchanged. First-party licensing is GPL-3.0-only.
+
+## 0.7.2 redraw and transaction costs
+
+The model supplies stable revision tokens and shared immutable source maps;
+Undo states are shared rather than recursively duplicated by checkpoints.
+Validated native editing callbacks are grouped directly in model history instead
+of reparsing a computed whole-document diff. The editor keeps one projection and
+one galley per current layout key. Width, fonts/DPI, theme, search, reveal, source
+revision and image geometry invalidate the appropriate derived data. Painting
+is restricted to the viewport. Derived caches have explicit bounds; they do not
+change source semantics, byte positions, serialization or save conflict policy.
+
+The vault index worker receives a shared previous snapshot and reuses unchanged
+notes after identity/size/mtime/ctime checks; text is shared between snapshots.
+Changed notes are read/validated again. No filesystem polling loop is added.

@@ -249,6 +249,7 @@ pub fn install_font(ctx: &Context, settings: &AppSettings) -> Option<String> {
         fonts.families.insert(FontFamily::Name(name.into()), family);
     }
     ctx.set_fonts(fonts);
+    diamond_editor::invalidate_font_layouts(ctx);
     error
 }
 

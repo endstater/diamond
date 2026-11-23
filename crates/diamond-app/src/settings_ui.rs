@@ -58,8 +58,16 @@ pub fn show(ui: &mut egui::Ui, settings: &mut AppSettings, fonts: &[SystemFont])
                     }
                 });ui.end_row();
             ui.label(tr("Акцентный цвет"));
-            ui.horizontal(|ui|{
+            ui.horizontal_wrapped(|ui|{
                 changed|=ui.color_edit_button_srgb(&mut settings.accent).changed();
+                let key=ui.make_persistent_id("accent-hex-draft");
+                let mut draft=ui.ctx().data_mut(|data|data.get_temp::<(String,[u8;3])>(key)).unwrap_or_else(||(format!("#{:02X}{:02X}{:02X}",settings.accent[0],settings.accent[1],settings.accent[2]),settings.accent));
+                if draft.1!=settings.accent{draft=(format!("#{:02X}{:02X}{:02X}",settings.accent[0],settings.accent[1],settings.accent[2]),settings.accent);}
+                let field=ui.add(egui::TextEdit::singleline(&mut draft.0).desired_width(100.0).char_limit(7).hint_text("#RRGGBB"));
+                let commit=field.lost_focus()||field.has_focus()&&ui.input(|input|input.key_pressed(egui::Key::Enter));
+                if commit&&let Some(color)=diamond_core::color::parse_hex(&draft.0){changed|=settings.accent!=color;settings.accent=color;draft.1=color;}
+                if diamond_core::color::parse_hex(&draft.0).is_none(){field.on_hover_text(tr("Use a six-digit color, for example #7BB2FF"));}
+                ui.ctx().data_mut(|data|data.insert_temp(key,draft));
                 for color in [[255,137,152],[255,166,109],[243,168,30],[190,224,112],[118,215,174],[123,178,255],[212,144,255]]{
                     let (rect,response)=ui.allocate_exact_size(egui::vec2(22.0,22.0),egui::Sense::click());
                     ui.painter().rect_filled(rect,7.0,egui::Color32::from_rgb(color[0],color[1],color[2]));

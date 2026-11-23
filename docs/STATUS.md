@@ -1,4 +1,9 @@
-# Current snapshot: 0.7.1
+# Current snapshot: 0.7.2
+
+0.7.2 targets redraw/typing/indexing cost, fixes table-gap and quote bounds,
+centers the supported braced-array/relation form and adds HEX accent entry.
+See PERFORMANCE.md for the source audit and optional timing mode. No native
+CPU measurements or Rust compilation were possible in this environment.
 
 0.7.1 corrects PluginHost view storage and the v1/v2 commands response schema,
 changes first-party licensing to GPL-3.0-only, replaces the public README with a

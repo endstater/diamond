@@ -4,6 +4,76 @@
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+static NEXT_PROJECTION: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Default)]
+struct LayoutCache(Option<CachedLayout>);
+struct CachedLayout {
+    generation: u64,
+    font: FontId,
+    width: u32,
+    wrap: bool,
+    dark: bool,
+    color: Color32,
+    accent: Color32,
+    epoch: u64,
+    scale: u32,
+    matches: Vec<Range<usize>>,
+    active: Option<Range<usize>>,
+    galley: Arc<egui::Galley>,
+}
+impl LayoutCache {
+    fn layout(
+        &mut self,
+        projection: &Projection,
+        ui: &egui::Ui,
+        size: f32,
+        width: f32,
+        options: &ViewOptions<'_>,
+    ) -> Arc<egui::Galley> {
+        let font = FontId::new(size, options.family.clone());
+        let color = ui.visuals().text_color();
+        let epoch = super::font_epoch(ui.ctx());
+        let scale = ui.ctx().pixels_per_point().to_bits();
+        if let Some(hit) = self.0.as_ref().filter(|hit| {
+            hit.generation == projection.generation
+                && hit.font == font
+                && hit.width == width.to_bits()
+                && hit.wrap == options.wrap
+                && hit.dark == options.dark
+                && hit.color == color
+                && hit.accent == options.accent
+                && hit.epoch == epoch
+                && hit.scale == scale
+                && hit.matches.as_slice() == options.matches
+                && hit.active.as_ref() == options.active
+        }) {
+            return Arc::clone(&hit.galley);
+        }
+        let mut job = projection.layout(ui, size, width, color, options);
+        super::emoji::decorate_job(ui.ctx(), &mut job);
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        self.0 = Some(CachedLayout {
+            generation: projection.generation,
+            font,
+            width: width.to_bits(),
+            wrap: options.wrap,
+            dark: options.dark,
+            color,
+            accent: options.accent,
+            epoch,
+            scale,
+            matches: options.matches.to_vec(),
+            active: options.active.cloned(),
+            galley: Arc::clone(&galley),
+        });
+        galley
+    }
+}
 
 use diamond_document::{BlockKind, Document, Mark, MarkKind};
 use egui::text::{CCursor, CCursorRange, LayoutJob};
@@ -26,6 +96,12 @@ struct SourceSelection {
     secondary: usize,
 }
 
+struct CachedProjection {
+    revision: u64,
+    reveal: Option<Range<usize>>,
+    projection: Rc<RefCell<Projection>>,
+}
+
 #[derive(Default)]
 pub(super) struct LiveState {
     selection: SourceSelection,
@@ -37,6 +113,8 @@ pub(super) struct LiveState {
     composition_selection: SourceSelection,
     reset_native_state: bool,
     pending_jump: Option<usize>,
+    projection_cache: Option<CachedProjection>,
+    layout_cache: Rc<RefCell<LayoutCache>>,
 }
 
 impl LiveState {
@@ -90,6 +168,7 @@ struct ProjectedBlock {
     math: Vec<diamond_document::MathSpan>,
     footnotes: Vec<diamond_document::FootnoteRef>,
     content_start: usize,
+    content_end: usize,
     header: Option<Range<usize>>,
     gap: Option<Range<usize>>,
     source_range: Range<usize>,
@@ -97,6 +176,7 @@ struct ProjectedBlock {
     language: String,
     order: u64,
     table: Option<diamond_document::Table>,
+    table_layout: RefCell<Option<(TableStyle, Rc<TableLayout>)>>,
     image: Option<diamond_document::Image>,
     image_height: f32,
     revealed: bool,
@@ -106,6 +186,8 @@ struct ProjectedBlock {
 
 #[derive(Clone)]
 struct Projection {
+    revision: u64,
+    generation: u64,
     text: String,
     source: String,
     /// Every displayed scalar boundary has an explicit source scalar anchor.
@@ -115,9 +197,11 @@ struct Projection {
 
 impl Projection {
     fn build(document: &Document, reveal: Option<&Range<usize>>) -> Self {
-        let map = document.source_map();
+        let map = document.source_map_shared();
         let chars: Vec<_> = map.source.chars().collect();
         let mut result = Self {
+            revision: document.revision(),
+            generation: NEXT_PROJECTION.fetch_add(1, Ordering::Relaxed),
             text: String::new(),
             source: map.source.clone(),
             to_source: vec![0],
@@ -154,6 +238,7 @@ impl Projection {
                 header = Some(start..result.scalar_len());
             }
             let content_start = result.scalar_len();
+            let content_byte_start = result.text.len();
             let revealed = !block_map.is_exact
                 || block.kind == BlockKind::Raw
                 || reveal.is_some_and(|active| ranges_touch(active, range));
@@ -195,6 +280,11 @@ impl Projection {
                     }
                 }
             }
+            let content_end = content_start
+                + result.text[content_byte_start..]
+                    .trim_end_matches(['\r', '\n'])
+                    .chars()
+                    .count();
             let view_end = result.scalar_len();
             if block.kind == BlockKind::Code {
                 result.append_virtual("\n", range.end);
@@ -210,6 +300,7 @@ impl Projection {
                 math: block.math.clone(),
                 footnotes: block.footnotes.clone(),
                 content_start,
+                content_end,
                 header,
                 gap,
                 source_range: range.clone(),
@@ -217,6 +308,7 @@ impl Projection {
                 language: block.language().into(),
                 order: block.order(),
                 table: block.table.clone(),
+                table_layout: RefCell::new(None),
                 image: block.image.clone(),
                 image_height: 88.0,
                 revealed,
@@ -483,8 +575,9 @@ impl Projection {
                                     .x
                             })
                             .max(1.0);
-                        format.font_id = FontId::monospace(size.x.max(1.0) * 16.0 / unit);
+                        format.font_id = FontId::monospace((size.x + 4.0) * 16.0 / unit);
                         format.color = Color32::TRANSPARENT;
+                        format.valign = egui::Align::Center;
                         format.extra_letter_spacing = 0.0;
                         format.line_height = Some(size.y.max(font_size * 1.3) + 6.0);
                         if block.kind == BlockKind::Math {
@@ -507,11 +600,9 @@ impl Projection {
                         .gamma_multiply(if selected { 0.48 } else { 0.23 });
             }
             let mut encoded = [0; 4];
-            if let Some(block) = self
-                .blocks
-                .get(block_index)
-                .filter(|block| !block.revealed && block.table.is_some())
-            {
+            if let Some(block) = self.blocks.get(block_index).filter(|block| {
+                view == block.content_start && !block.revealed && block.table.is_some()
+            }) {
                 let rows = block.table.as_ref().map_or(1, |table| {
                     table
                         .cells
@@ -532,8 +623,18 @@ impl Projection {
     }
 }
 
+#[derive(Clone, PartialEq)]
+struct TableStyle {
+    font: FontId,
+    epoch: u64,
+    scale: u32,
+    text: Color32,
+    accent: Color32,
+    code: Color32,
+}
 struct TableLayout {
     columns: Vec<f32>,
+    galleys: RefCell<std::collections::HashMap<(usize, usize), Arc<egui::Galley>>>,
 }
 impl TableLayout {
     fn width(&self) -> f32 {
@@ -545,11 +646,27 @@ fn table_layout(
     block: &ProjectedBlock,
     size: f32,
     family: &egui::FontFamily,
-) -> Option<TableLayout> {
+) -> Option<Rc<TableLayout>> {
     if block.revealed {
         return None;
     }
     let table = block.table.as_ref()?;
+    let style = TableStyle {
+        font: FontId::new(size, family.clone()),
+        epoch: super::font_epoch(ui.ctx()),
+        scale: ui.ctx().pixels_per_point().to_bits(),
+        text: ui.visuals().text_color(),
+        accent: ui.visuals().hyperlink_color,
+        code: ui.visuals().code_bg_color,
+    };
+    if let Some((_, cached)) = block
+        .table_layout
+        .borrow()
+        .as_ref()
+        .filter(|(key, _)| *key == style)
+    {
+        return Some(Rc::clone(cached));
+    }
     let mut columns = vec![64.0_f32; table.columns.len()];
     let glyph_width = |text: &str, font_size: f32| {
         ui.fonts_mut(|fonts| {
@@ -609,7 +726,12 @@ fn table_layout(
             *column = column.max(*width + 24.0);
         }
     }
-    Some(TableLayout { columns })
+    let layout = Rc::new(TableLayout {
+        columns,
+        galleys: RefCell::new(std::collections::HashMap::new()),
+    });
+    *block.table_layout.borrow_mut() = Some((style, Rc::clone(&layout)));
+    Some(layout)
 }
 
 fn ranges_touch(active: &Range<usize>, block: &Range<usize>) -> bool {
@@ -621,25 +743,20 @@ fn ranges_touch(active: &Range<usize>, block: &Range<usize>) -> bool {
 }
 
 fn caret_block(document: &Document, source: usize) -> Option<Range<usize>> {
-    let map = document.source_map();
-    let length = map.source.chars().count();
-    map.blocks
-        .iter()
-        .zip(document.blocks())
-        .find(|(block, semantic)| {
-            if source < block.source_range.start {
-                return false;
-            }
-            let fragment = &map.source[block.source_byte_range.clone()];
-            // The caret after a trailing newline belongs to the empty next line,
-            // including EOF. Never fall back to the preceding block in a gap.
-            let open_code = semantic.kind == BlockKind::Code && open_fence(fragment);
-            source < block.source_range.end
-                || (source == length
-                    && source == block.source_range.end
-                    && ((!fragment.ends_with('\n') && !fragment.is_empty()) || open_code))
-        })
-        .map(|(block, _)| block.source_range.clone())
+    let map = document.source_map_shared();
+    let index = map
+        .blocks
+        .partition_point(|block| block.source_range.start <= source)
+        .checked_sub(1)?;
+    let block = &map.blocks[index];
+    let semantic = document.blocks().get(index)?;
+    let fragment = &map.source[block.source_byte_range.clone()];
+    let open_code = semantic.kind == BlockKind::Code && open_fence(fragment);
+    (source < block.source_range.end
+        || (source == map.source_scalar_len
+            && source == block.source_range.end
+            && ((!fragment.ends_with('\n') && !fragment.is_empty()) || open_code)))
+        .then(|| block.source_range.clone())
 }
 
 fn open_fence(source: &str) -> bool {
@@ -787,34 +904,6 @@ impl TextBuffer for LiveBuffer<'_> {
     }
 }
 
-/// Reconstruct one source transaction, rather than keeping TextEdit's separate
-/// delete/insert callbacks (or each intermediate IME candidate) in history.
-fn coalesce(mut before: Document, after: &Document) -> Result<Document, String> {
-    let old = before.to_markdown();
-    let new = after.to_markdown();
-    if old == new {
-        return Ok(before);
-    }
-    let old_chars: Vec<_> = old.chars().collect();
-    let new_chars: Vec<_> = new.chars().collect();
-    let prefix = old_chars
-        .iter()
-        .zip(&new_chars)
-        .take_while(|(a, b)| a == b)
-        .count();
-    let suffix = old_chars[prefix..]
-        .iter()
-        .rev()
-        .zip(new_chars[prefix..].iter().rev())
-        .take_while(|(a, b)| a == b)
-        .count();
-    let replacement: String = new_chars[prefix..new_chars.len() - suffix].iter().collect();
-    before
-        .replace_source_range(prefix..old_chars.len() - suffix, &replacement)
-        .map_err(|error| error.to_string())?;
-    Ok(before)
-}
-
 pub(super) fn show(
     ui: &mut egui::Ui,
     document: &mut Document,
@@ -903,15 +992,45 @@ pub(super) fn show(
                 .and_then(|range| caret_block(document, range.start))
         };
     }
-    let mut initial = Projection::build(document, state.reveal.as_ref());
-    for block in &mut initial.blocks {
-        if let Some(image) = &block.image {
-            block.image_height =
-                images.height(&image.target, (ui.available_width() - 28.0).max(1.0));
+    let revision = document.revision();
+    let cached = state
+        .projection_cache
+        .as_ref()
+        .filter(|cached| cached.revision == revision && cached.reveal == state.reveal)
+        .map(|cached| Rc::clone(&cached.projection));
+    let rebuilt = cached.is_none();
+    let projection = cached.unwrap_or_else(|| {
+        Rc::new(RefCell::new(Projection::build(
+            document,
+            state.reveal.as_ref(),
+        )))
+    });
+    {
+        let mut initial = projection.borrow_mut();
+        let mut geometry_changed = false;
+        for block in &mut initial.blocks {
+            if let Some(image) = &block.image {
+                let height = images.height(&image.target, (ui.available_width() - 28.0).max(1.0));
+                if height != block.image_height {
+                    block.image_height = height;
+                    geometry_changed = true;
+                }
+            }
+        }
+        if geometry_changed {
+            initial.generation = NEXT_PROJECTION.fetch_add(1, Ordering::Relaxed);
         }
     }
+    state.projection_cache = Some(CachedProjection {
+        revision,
+        reveal: state.reveal.clone(),
+        projection: Rc::clone(&projection),
+    });
+    let initial = projection.borrow();
 
-    if !state.composing && (initial.text != state.last_projection || state.reset_native_state) {
+    if !state.composing
+        && ((rebuilt && initial.text != state.last_projection) || state.reset_native_state)
+    {
         let mut native = if state.reset_native_state {
             egui::text_edit::TextEditState::default()
         } else {
@@ -927,10 +1046,16 @@ pub(super) fn show(
         state.reset_native_state = false;
     }
     let before_selection = state.selection;
-    let projection = Rc::new(RefCell::new(initial));
+    let text = if rebuilt {
+        initial.text.clone()
+    } else {
+        std::mem::take(&mut state.last_projection)
+    };
+    drop(initial);
     let layout_projection = Rc::clone(&projection);
+    let layout_cache = Rc::clone(&state.layout_cache);
     let mut adapter = LiveBuffer {
-        text: projection.borrow().text.clone(),
+        text,
         projection: Rc::clone(&projection),
         document,
         reveal: state.reveal.clone(),
@@ -941,15 +1066,9 @@ pub(super) fn show(
         checkpoint: None,
     };
     let mut layouter = |ui: &egui::Ui, _buffer: &dyn TextBuffer, width: f32| {
-        let mut job = layout_projection.borrow().layout(
-            ui,
-            font_size,
-            width,
-            ui.visuals().text_color(),
-            options,
-        );
-        super::emoji::decorate_job(ui.ctx(), &mut job);
-        ui.fonts_mut(|fonts| fonts.layout_job(job))
+        layout_cache
+            .borrow_mut()
+            .layout(&layout_projection.borrow(), ui, font_size, width, options)
     };
     let mut table_action = None;
     let mut table_jump = None;
@@ -977,7 +1096,7 @@ pub(super) fn show(
                 })
                 .layouter(&mut layouter)
                 .show(ui);
-            has_focus = output.response.has_focus();
+            has_focus = ui.input(|input| input.focused) && output.response.has_focus();
             if let Some(cursor) = output.cursor_range {
                 let map = projection.borrow();
                 state.selection = SourceSelection {
@@ -1117,7 +1236,7 @@ pub(super) fn show(
         state.selection = selection;
     }
     state.reveal = adapter.reveal;
-    state.last_projection.clone_from(&adapter.text);
+    state.last_projection = std::mem::take(&mut adapter.text);
     if let Some(error) = adapter.error {
         if let Some(before) = adapter.checkpoint.take() {
             *adapter.document = before;
@@ -1127,13 +1246,8 @@ pub(super) fn show(
         response.error = Some(error);
     } else if adapter.changed {
         let before = adapter.checkpoint.take().expect("changed edit checkpoint");
-        match coalesce(before, adapter.document) {
-            Ok(merged) => {
-                *adapter.document = merged;
-                response.changed = true;
-            }
-            Err(error) => response.error = Some(error),
-        }
+        adapter.document.group_history_since(before);
+        response.changed = true;
     }
     if let Some((index, row, column, action)) =
         table_action.filter(|_| !state.composing && !adapter.changed)
@@ -1158,10 +1272,7 @@ pub(super) fn show(
     }
     if commit && state.composing {
         if let Some(checkpoint) = state.composition_checkpoint.take() {
-            match coalesce(checkpoint, adapter.document) {
-                Ok(merged) => *adapter.document = merged,
-                Err(error) => response.error = Some(error),
-            }
+            adapter.document.group_history_since(checkpoint);
         }
         state.composing = false;
         state.reset_native_state = true;
@@ -1172,7 +1283,26 @@ pub(super) fn show(
     // Force source-anchored selection after each transaction. In particular a
     // revealed prefix must never move the caret by the hidden marker count.
     if !state.composing && (adapter.changed || response.changed) {
-        let current = Projection::build(adapter.document, state.reveal.as_ref());
+        let current = if projection.borrow().revision == adapter.document.revision() {
+            Rc::clone(&projection)
+        } else {
+            Rc::new(RefCell::new(Projection::build(
+                adapter.document,
+                state.reveal.as_ref(),
+            )))
+        };
+        {
+            let current = current.borrow();
+            if current.text != state.last_projection {
+                state.last_projection.clone_from(&current.text);
+            }
+        }
+        state.projection_cache = Some(CachedProjection {
+            revision: adapter.document.revision(),
+            reveal: state.reveal.clone(),
+            projection: Rc::clone(&current),
+        });
+        let current = current.borrow();
         if let Some(mut native) = egui::text_edit::TextEditState::load(ui.ctx(), id) {
             native.cursor.set_char_range(Some(CCursorRange {
                 primary: CCursor::new(current.view_at(state.selection.primary)),
@@ -1197,6 +1327,33 @@ pub(super) fn show(
     response
 }
 
+fn visible_blocks(
+    ui: &egui::Ui,
+    output: &egui::text_edit::TextEditOutput,
+    projection: &Projection,
+) -> Range<usize> {
+    let clip = ui.clip_rect();
+    let origin = output.galley_pos;
+    let first = output
+        .galley
+        .cursor_from_pos(egui::vec2(0.0, clip.top() - origin.y))
+        .index;
+    let last = output
+        .galley
+        .cursor_from_pos(egui::vec2(
+            output.response.rect.width(),
+            clip.bottom() - origin.y,
+        ))
+        .index;
+    let start = projection
+        .blocks
+        .partition_point(|block| block.view_range.end < first);
+    let end = projection
+        .blocks
+        .partition_point(|block| block.view_range.start <= last);
+    start.min(end)..end
+}
+
 fn paint_structures(
     ui: &mut egui::Ui,
     output: &egui::text_edit::TextEditOutput,
@@ -1207,7 +1364,7 @@ fn paint_structures(
     images: &mut super::media::Images,
 ) {
     let mut shapes = Vec::new();
-    for block in &projection.blocks {
+    for block in &projection.blocks[visible_blocks(ui, output, projection)] {
         let start = output
             .galley
             .pos_from_cursor(CCursor::new(block.view_range.start))
@@ -1215,11 +1372,7 @@ fn paint_structures(
         let end = output
             .galley
             .pos_from_cursor(CCursor::new(
-                block
-                    .view_range
-                    .end
-                    .saturating_sub(1)
-                    .max(block.view_range.start),
+                block.content_end.saturating_sub(1).max(block.content_start),
             ))
             .translate(output.galley_pos.to_vec2());
         if block.kind == BlockKind::Code {
@@ -1248,7 +1401,13 @@ fn paint_structures(
                 egui::StrokeKind::Inside,
             ));
         }
-        if block.revealed {
+        if !ui
+            .clip_rect()
+            .intersects(egui::Rect::from_min_max(start.min, end.max))
+        {
+            continue;
+        }
+        if block.revealed || block.table.is_some() {
             continue;
         }
         for reference in &block.footnotes {
@@ -1274,8 +1433,20 @@ fn paint_structures(
                 formula.size * (size / 16.0),
                 (output.response.rect.right() - output.galley_pos.x - 12.0).max(1.0),
             );
+            let after = output
+                .galley
+                .pos_from_cursor(CCursor::new(block.content_start + math.range.end))
+                .translate(output.galley_pos.to_vec2());
+            let advance = if (after.top() - caret.top()).abs() < 1.0 {
+                (after.left() - caret.left()).max(dimensions.x)
+            } else {
+                dimensions.x + 4.0
+            };
             let rect = egui::Rect::from_min_size(
-                egui::pos2(caret.left() + 2.0, caret.center().y - dimensions.y / 2.0),
+                egui::pos2(
+                    caret.left() + (advance - dimensions.x) * 0.5,
+                    caret.center().y - dimensions.y / 2.0,
+                ),
                 dimensions,
             );
             super::math::paint(ui, &formula, rect, ui.visuals().text_color());
@@ -1318,7 +1489,7 @@ fn paint_decorations(
 ) -> Option<usize> {
     let mut toggled = None;
     let color = ui.visuals().weak_text_color();
-    for block in &projection.blocks {
+    for block in &projection.blocks[visible_blocks(ui, output, projection)] {
         if block.revealed && !matches!(block.kind, BlockKind::Task(_)) {
             continue;
         }
@@ -1326,6 +1497,15 @@ fn paint_decorations(
             .galley
             .pos_from_cursor(CCursor::new(block.content_start))
             .translate(output.galley_pos.to_vec2());
+        let final_row = output
+            .galley
+            .pos_from_cursor(CCursor::new(
+                block.content_end.saturating_sub(1).max(block.content_start),
+            ))
+            .translate(output.galley_pos.to_vec2());
+        if final_row.bottom() < ui.clip_rect().top() || caret.top() > ui.clip_rect().bottom() {
+            continue;
+        }
         let indent = container_indent(block, font_size);
         let body_x = output.galley_pos.x + indent;
         let center = egui::pos2(body_x - 18.0, caret.center().y);
@@ -1333,11 +1513,7 @@ fn paint_decorations(
             let end = output
                 .galley
                 .pos_from_cursor(CCursor::new(
-                    block
-                        .view_range
-                        .end
-                        .saturating_sub(1)
-                        .max(block.content_start),
+                    block.content_end.saturating_sub(1).max(block.content_start),
                 ))
                 .translate(output.galley_pos.to_vec2());
             for level in 0..block.quote_depth {
@@ -1687,7 +1863,8 @@ mod tests {
         let mut editor = buffer(&mut document, Some(0..11));
         editor.delete_char_range(2..8);
         editor.insert_text("世界", 2);
-        let mut merged = coalesce(before, editor.document).unwrap();
+        let mut merged = editor.document.clone();
+        merged.group_history_since(before);
         assert_eq!(merged.to_markdown(), "**世界**\n");
         assert!(merged.undo());
         assert_eq!(merged.to_markdown(), "**Привет**\n");
@@ -1724,8 +1901,7 @@ fn paint_tables(
 ) -> Option<(usize, usize, usize, diamond_document::TableAction)> {
     use diamond_document::{CellAlignment, TableAction};
     let mut command = None;
-    for block in projection
-        .blocks
+    for block in projection.blocks[visible_blocks(ui, output, projection)]
         .iter()
         .filter(|block| !block.revealed && block.table.is_some())
     {
@@ -1765,7 +1941,15 @@ fn paint_tables(
                         egui::vec2(layout.width(), rows as f32 * size * 1.9),
                         egui::Sense::hover(),
                     );
-                    for cell in &table.cells {
+                    let first_row = ((ui.clip_rect().top() - area.top()) / (size * 1.9))
+                        .floor()
+                        .max(0.0) as usize;
+                    let last_row = ((ui.clip_rect().bottom() - area.top()) / (size * 1.9))
+                        .ceil()
+                        .max(0.0) as usize;
+                    let first = table.cells.partition_point(|cell| cell.row < first_row);
+                    let last = table.cells.partition_point(|cell| cell.row <= last_row);
+                    for cell in &table.cells[first..last] {
                         let left =
                             area.left() + layout.columns.iter().take(cell.column).sum::<f32>();
                         let cell_rect = egui::Rect::from_min_size(
@@ -1793,69 +1977,87 @@ fn paint_tables(
                             Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
                             egui::StrokeKind::Inside,
                         );
-                        let mut job = LayoutJob::default();
-                        for (offset, c) in cell.text.chars().enumerate() {
-                            let position = cell.range.start + offset;
-                            let mut format = TextFormat::simple(
-                                FontId::new(size, options.family.clone()),
-                                ui.visuals().text_color(),
-                            );
-                            for mark in block
-                                .marks
-                                .iter()
-                                .filter(|mark| mark.range.contains(&position))
-                            {
-                                match mark.kind {
-                                    MarkKind::Bold => format.extra_letter_spacing = 0.3,
-                                    MarkKind::Italic => format.italics = true,
-                                    MarkKind::Strike => {
-                                        format.strikethrough = Stroke::new(1.0, format.color)
-                                    }
-                                    MarkKind::Code => {
-                                        format.font_id = FontId::monospace(size);
-                                        format.background = ui.visuals().code_bg_color;
+                        let cached = layout
+                            .galleys
+                            .borrow()
+                            .get(&(cell.row, cell.column))
+                            .cloned();
+                        let galley = if let Some(cached) = cached {
+                            cached
+                        } else {
+                            let mut job = LayoutJob::default();
+                            for (offset, c) in cell.text.chars().enumerate() {
+                                let position = cell.range.start + offset;
+                                let mut format = TextFormat::simple(
+                                    FontId::new(size, options.family.clone()),
+                                    ui.visuals().text_color(),
+                                );
+                                for mark in block
+                                    .marks
+                                    .iter()
+                                    .filter(|mark| mark.range.contains(&position))
+                                {
+                                    match mark.kind {
+                                        MarkKind::Bold => format.extra_letter_spacing = 0.3,
+                                        MarkKind::Italic => format.italics = true,
+                                        MarkKind::Strike => {
+                                            format.strikethrough = Stroke::new(1.0, format.color)
+                                        }
+                                        MarkKind::Code => {
+                                            format.font_id = FontId::monospace(size);
+                                            format.background = ui.visuals().code_bg_color;
+                                        }
                                     }
                                 }
+                                if block
+                                    .links
+                                    .iter()
+                                    .any(|link| link.range.contains(&position))
+                                {
+                                    format.color = options.accent;
+                                    format.underline = Stroke::new(1.0, options.accent);
+                                }
+                                if let Some(math) = block
+                                    .math
+                                    .iter()
+                                    .find(|math| math.range.contains(&position))
+                                {
+                                    let dimensions = fit_formula(
+                                        super::math::formula(ui.ctx(), &math.latex, math.display)
+                                            .size
+                                            * (size / 16.0),
+                                        cell_rect.width() - 20.0,
+                                    );
+                                    let unit = ui
+                                        .fonts_mut(|fonts| {
+                                            fonts
+                                                .layout_no_wrap(
+                                                    "◇".into(),
+                                                    FontId::monospace(16.0),
+                                                    Color32::WHITE,
+                                                )
+                                                .size()
+                                                .x
+                                        })
+                                        .max(1.0);
+                                    format.font_id = FontId::monospace(dimensions.x * 16.0 / unit);
+                                    format.color = Color32::TRANSPARENT;
+                                    format.extra_letter_spacing = 0.0;
+                                    format.line_height = Some(size * 1.9);
+                                }
+                                job.append(&c.to_string(), 0.0, format);
                             }
-                            if block
-                                .links
-                                .iter()
-                                .any(|link| link.range.contains(&position))
+                            super::emoji::decorate_job(ui.ctx(), &mut job);
+                            let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
                             {
-                                format.color = options.accent;
-                                format.underline = Stroke::new(1.0, options.accent);
+                                let mut cache = layout.galleys.borrow_mut();
+                                if cache.len() >= 512 {
+                                    cache.clear();
+                                }
+                                cache.insert((cell.row, cell.column), Arc::clone(&galley));
                             }
-                            if let Some(math) = block
-                                .math
-                                .iter()
-                                .find(|math| math.range.contains(&position))
-                            {
-                                let dimensions = fit_formula(
-                                    super::math::formula(ui.ctx(), &math.latex, math.display).size
-                                        * (size / 16.0),
-                                    cell_rect.width() - 20.0,
-                                );
-                                let unit = ui
-                                    .fonts_mut(|fonts| {
-                                        fonts
-                                            .layout_no_wrap(
-                                                "◇".into(),
-                                                FontId::monospace(16.0),
-                                                Color32::WHITE,
-                                            )
-                                            .size()
-                                            .x
-                                    })
-                                    .max(1.0);
-                                format.font_id = FontId::monospace(dimensions.x * 16.0 / unit);
-                                format.color = Color32::TRANSPARENT;
-                                format.extra_letter_spacing = 0.0;
-                                format.line_height = Some(size * 1.9);
-                            }
-                            job.append(&c.to_string(), 0.0, format);
-                        }
-                        super::emoji::decorate_job(ui.ctx(), &mut job);
-                        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+                            galley
+                        };
                         let x = match table.columns[cell.column] {
                             CellAlignment::Left => cell_rect.left() + 10.0,
                             CellAlignment::Center => cell_rect.center().x - galley.size().x / 2.0,
@@ -1943,4 +2145,136 @@ fn paint_tables(
         });
     }
     command
+}
+
+#[cfg(test)]
+mod redraw_regressions {
+    use super::*;
+    fn options() -> ViewOptions<'static> {
+        ViewOptions {
+            language: diamond_core::Language::En,
+            family: egui::FontFamily::Proportional,
+            wrap: true,
+            matches: &[],
+            active: None,
+            jump: None,
+            accent: Color32::LIGHT_BLUE,
+            dark: true,
+        }
+    }
+    #[test]
+    fn table_height_does_not_leak_into_the_blank_line_before_it() {
+        let context = egui::Context::default();
+        let document = Document::parse(
+            "# Heading\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n\nafter\n",
+        );
+        let projection = Projection::build(&document, None);
+        let table = projection
+            .blocks
+            .iter()
+            .find(|block| block.table.is_some())
+            .unwrap();
+        let before = table.content_start - 1;
+        let _ = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let job = projection.layout(ui, 17.0, 600.0, Color32::WHITE, &options());
+                let before_byte = projection.text.char_indices().nth(before).unwrap().0;
+                let format = &job
+                    .sections
+                    .iter()
+                    .find(|section| section.byte_range.contains(&before_byte))
+                    .unwrap()
+                    .format;
+                assert!(format.line_height.is_none_or(|height| height < 40.0));
+                let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+                assert!(galley.pos_from_cursor(CCursor::new(before)).height() < 40.0);
+                assert!(
+                    galley
+                        .pos_from_cursor(CCursor::new(table.content_start))
+                        .height()
+                        > 100.0
+                );
+            });
+        });
+    }
+    #[test]
+    fn quote_content_end_excludes_line_breaks_before_the_next_paragraph() {
+        let input = "> first\n> second\n\nnext\n";
+        let document = Document::parse(input);
+        let projection = Projection::build(&document, None);
+        let quote = projection
+            .blocks
+            .iter()
+            .find(|block| block.quote_depth > 0 && block.text == "second")
+            .unwrap();
+        assert_eq!(
+            projection.text.chars().nth(quote.content_end - 1),
+            Some('d')
+        );
+        assert!(quote.content_end < quote.view_range.end);
+        assert_eq!(document.to_markdown(), input);
+    }
+    #[test]
+    fn inactive_window_reuses_projection_and_galley_with_widget_focus_retained() {
+        let context = egui::Context::default();
+        let id = egui::Id::new("warm-redraw");
+        let mut document = Document::parse("# Title\n\n- [ ] task\n\ntext\n");
+        let mut state = LiveState::default();
+        let mut images = super::super::media::Images::default();
+        let mut warm_projection = None;
+        let mut warm_galley = None;
+        for frame in 0..8 {
+            let output = context.run(
+                egui::RawInput {
+                    focused: false,
+                    time: Some(frame as f64),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640.0, 480.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.memory_mut(|memory| memory.request_focus(id));
+                        show(
+                            ui,
+                            &mut document,
+                            &mut state,
+                            id,
+                            17.0,
+                            &options(),
+                            &mut images,
+                        );
+                    });
+                },
+            );
+            if frame == 3 {
+                warm_projection = state
+                    .projection_cache
+                    .as_ref()
+                    .map(|cached| Rc::clone(&cached.projection));
+                warm_galley = state
+                    .layout_cache
+                    .borrow()
+                    .0
+                    .as_ref()
+                    .map(|cache| Arc::clone(&cache.galley));
+            }
+            if frame > 3 {
+                assert!(Rc::ptr_eq(
+                    warm_projection.as_ref().unwrap(),
+                    &state.projection_cache.as_ref().unwrap().projection
+                ));
+                assert!(Arc::ptr_eq(
+                    warm_galley.as_ref().unwrap(),
+                    &state.layout_cache.borrow().0.as_ref().unwrap().galley
+                ));
+                assert!(
+                    output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+                        > std::time::Duration::ZERO
+                );
+            }
+        }
+    }
 }

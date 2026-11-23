@@ -1,0 +1,64 @@
+# Performance audit — 0.7.2
+
+These are source-level findings and changes, not measured CPU percentages.
+Rust/Cargo and a running Diamond desktop are unavailable in the preparation
+environment; compilation, native regression tests and real process CPU profiling
+still need to run on the target machine.
+
+| Previous work | Change |
+| --- | --- |
+| Rebuild/parse source maps at several caret/projection points every frame | One shared map per model revision; binary block lookup |
+| Deep-clone the full Undo history for each checkpoint | Share immutable past states through Arc |
+| Serialize, diff and parse the whole note again when grouping callbacks/IME | Group validated history directly, keeping the current parsed state |
+| Rebuild projection and per-character layout on redraw | Retain projection and native galley; invalidate on actual source/view changes |
+| Render all formulas, including offscreen ones, with a 24-entry FIFO | Cull to visible blocks; use a 128-entry / 64 MiB LRU |
+| Measure table columns and rebuild visible cell layouts repeatedly | Cache table measurements and up to 512 cell galleys; visit visible rows/cells |
+| Segment emoji for both layout and painting on each frame | Bounded text-run cache, ASCII fast path and visible-run painting |
+| Re-read/parse every note after a vault change | Reuse unchanged note metadata/source after identity/size/mtime/ctime checks |
+| Build task-count vectors every frame | Cached nested task counts per model state |
+| Construct drag payloads and paint clipped tree rows | Allocate payload only on drag start; skip offscreen paint |
+| Reveal checks could disagree when the widget kept focus in an inactive window | Require actual window focus in both phases; stop inactive spinner/progress animation |
+
+## Polling audit
+
+VaultWatch uses OS notifications through RecommendedWatcher. Plugin request and
+stdio loops block on channels/reads. GUI try_recv calls only drain completed
+work during an existing frame: they do not wake the app periodically. Filesystem
+coalescing (80 ms), autosave, preferences and notification expiry use event-driven,
+one-shot deadlines. They are not recurring scans. Cursor blinking, active
+spinners, animations, user input and a worker completion may legitimately repaint.
+Directory enumeration still runs after vault events; it is not a periodic job.
+
+## Optional timing log
+
+From the project root, after a successful release build:
+
+```sh
+DIAMOND_PROFILE=1 ./target/release/diamond 2>diamond-profile.log
+```
+
+Every five seconds *when an update occurs*, the log can report `updates`,
+`updates_per_sec`, `gui_mean_ms` and `gui_max_ms`. These are GUI-update timings,
+not total process CPU or guaranteed presentation FPS. It logs no note contents
+and schedules no timer/repaint. Silence while idle can mean the app is asleep.
+Without the environment variable, the profiler is disabled.
+
+Compare the same vault and note before/after in these conditions: focused idle,
+typing, scrolling, moving the pointer, and another window/workspace focused.
+Include a note with more than 24 formulas, a tall/wide table and nested quotes.
+Inspect process CPU separately in a system monitor; GUI timings exclude workers,
+driver work and the compositor. No fixed percentage improvement is claimed.
+
+## Layout checks
+
+- An empty line between a heading and a table keeps ordinary line height;
+  the table height belongs only to its placeholder glyph, not its newline.
+- A quote bar stops at its final text glyph and does not cover the next paragraph.
+- Tall formulas reserve their box height; adjacent paint uses native advances.
+- A complete leading `\left.\begin{array}...\end{array}\right\}` followed by
+  `\Rightarrow`, `\Longrightarrow`, `\implies` or `=` uses two centered boxes.
+  Other formula internals are still typeset by latex-rust, not a full TeX engine.
+- The HEX accent field accepts #RRGGBB and applies on Enter/focus loss.
+
+Run `cargo fmt --all`, `cargo test --workspace` and
+`cargo clippy --workspace --all-targets -- -D warnings` on the target machine.

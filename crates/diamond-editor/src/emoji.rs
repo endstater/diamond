@@ -97,9 +97,33 @@ fn texture(ctx: &Context, text: &str) -> Option<TextureHandle> {
     });
     result
 }
-fn runs(ctx: &Context, text: &str) -> Vec<Run> {
-    if FONT.get().is_none() || text.len() > 512 * 1024 {
-        return Vec::new();
+#[derive(Clone)]
+struct RunEntry {
+    text: String,
+    runs: Arc<Vec<Run>>,
+}
+#[derive(Clone, Default)]
+struct RunCache {
+    entries: Vec<RunEntry>,
+    bytes: usize,
+}
+fn empty_runs() -> Arc<Vec<Run>> {
+    static EMPTY: OnceLock<Arc<Vec<Run>>> = OnceLock::new();
+    Arc::clone(EMPTY.get_or_init(|| Arc::new(Vec::new())))
+}
+fn runs(ctx: &Context, text: &str) -> Arc<Vec<Run>> {
+    if FONT.get().is_none() || text.len() > 512 * 1024 || text.is_ascii() {
+        return empty_runs();
+    }
+    let id = egui::Id::new("emoji-run-cache");
+    if let Some(hit) = ctx.data_mut(|data| {
+        data.get_temp_mut_or_default::<RunCache>(id)
+            .entries
+            .iter()
+            .find(|entry| entry.text == text)
+            .map(|entry| Arc::clone(&entry.runs))
+    }) {
+        return hit;
     }
     let mut result = Vec::new();
     let mut scalar = 0;
@@ -116,6 +140,21 @@ fn runs(ctx: &Context, text: &str) -> Vec<Run> {
         }
         scalar = end;
     }
+    let result = Arc::new(result);
+    ctx.data_mut(|data| {
+        let cache = data.get_temp_mut_or_default::<RunCache>(id);
+        while !cache.entries.is_empty()
+            && (cache.entries.len() >= 8 || cache.bytes + text.len() > 1024 * 1024)
+        {
+            let removed = cache.entries.remove(0);
+            cache.bytes -= removed.text.len();
+        }
+        cache.bytes += text.len();
+        cache.entries.push(RunEntry {
+            text: text.into(),
+            runs: Arc::clone(&result),
+        });
+    });
     result
 }
 pub fn decorate_job(ctx: &Context, job: &mut egui::text::LayoutJob) {
@@ -127,15 +166,14 @@ pub fn decorate_job(ctx: &Context, job: &mut egui::text::LayoutJob) {
     for section in &job.sections {
         let mut position = section.byte_range.start;
         while position < section.byte_range.end {
-            let hit = runs.iter().find(|run| run.bytes.contains(&position));
+            let at = runs.partition_point(|run| run.bytes.end <= position);
+            let hit = runs.get(at).filter(|run| run.bytes.contains(&position));
             let end = if let Some(run) = hit {
                 run.bytes.end.min(section.byte_range.end)
             } else {
-                runs.iter()
-                    .find(|run| run.bytes.start > position)
-                    .map_or(section.byte_range.end, |run| {
-                        run.bytes.start.min(section.byte_range.end)
-                    })
+                runs.get(at).map_or(section.byte_range.end, |run| {
+                    run.bytes.start.min(section.byte_range.end)
+                })
             };
             if let Some(run) = hit {
                 let first_end = position
@@ -196,7 +234,22 @@ pub fn decorate_job(ctx: &Context, job: &mut egui::text::LayoutJob) {
     job.sections = sections;
 }
 pub fn paint(ui: &egui::Ui, galley: &egui::Galley, position: egui::Pos2, text: &str, size: f32) {
-    for run in runs(ui.ctx(), text) {
+    let runs = runs(ui.ctx(), text);
+    if runs.is_empty() {
+        return;
+    }
+    let first = galley
+        .cursor_from_pos(egui::vec2(0.0, ui.clip_rect().top() - position.y))
+        .index;
+    let last = galley
+        .cursor_from_pos(egui::vec2(
+            ui.clip_rect().right() - position.x,
+            ui.clip_rect().bottom() - position.y,
+        ))
+        .index;
+    let start = runs.partition_point(|run| run.scalars.end < first);
+    let end = runs.partition_point(|run| run.scalars.start <= last);
+    for run in &runs[start.min(end)..end] {
         let start = galley
             .pos_from_cursor(egui::text::CCursor::new(run.scalars.start))
             .translate(position.to_vec2());

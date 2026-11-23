@@ -50,3 +50,17 @@ commands-list DTO) and keeps commands replies compatible with v1. SVG previews
 accept UTF-8 BOM/comments/XML declarations and scale large vector viewports to
 a bounded 1200-pixel raster; raster input limits and disabled external SVG image
 resolvers remain unchanged. First-party licensing is GPL-3.0-only.
+
+0.7.2 retains the caret projection and native galley between unchanged frames,
+invalidating geometry on revision/reveal/width/font/theme/find/image changes.
+Only visible blocks, formulas, emoji and table cells are painted. Table widths
+and up to 512 cell galleys are retained per projected table. Math has an LRU
+bounded to 128 entries / 64 MiB of raster data; emoji segmentation uses a bounded
+snapshot cache. The blank separator before a table no longer receives table
+height, and only the table object glyph reserves that height. Quote bars end at
+the last content character, excluding trailing mapped line endings. Formula
+objects use centered vertical alignment and padded advances. A leading complete
+braced array followed by a supported top-level relation is composed as centered
+boxes to avoid the engine's first-row array baseline. Ordinary formulas retain
+the single-render path; source bytes remain unchanged. Window focus is checked
+at both entry and exit before requesting a reveal redraw.

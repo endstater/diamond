@@ -28,3 +28,10 @@ Math is enabled through pulldown-cmark: inline/display expressions become explic
 0.7 `edit_table` performs one undoable source transaction for row/column insertion,
 deletion and alignment. It preserves raw inline Markdown, escaped pipes and the
 rest of the document, and protects the header/last column from invalid deletion.
+
+0.7.2 snapshots share immutable Undo/Redo states. A cached shared source map and
+stable revision token avoid repeated parsing on redraw; the old owned source_map
+API remains available. group_history_since combines already validated edits into
+one Undo step without serializing/diffing/reparsing the whole note again. Undo,
+Redo and actual commits invalidate derived mappings/progress; rejected/no-op edits
+do not. task_progress caches the nested task counts per current state.

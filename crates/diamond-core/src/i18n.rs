@@ -14,6 +14,11 @@ pub enum Language {
 impl Language {
     pub fn text(self, key: &'static str) -> &'static str {
         let (en, ru, zh) = match key {
+            "Use a six-digit color, for example #7BB2FF" => (
+                "Use a six-digit color, for example #7BB2FF",
+                "Введите шесть HEX-цифр, например #7BB2FF",
+                "请输入六位十六进制颜色，例如 #7BB2FF",
+            ),
             "Syntax licenses" => (
                 "Syntax licenses",
                 "Лицензии грамматик подсветки",

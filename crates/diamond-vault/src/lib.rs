@@ -293,18 +293,45 @@ impl Vault {
     }
 
     pub fn build_index(&self) -> Result<VaultIndex> {
+        self.build_index_reusing(None)
+    }
+
+    /// Event-triggered rebuild: reuse unchanged notes, re-read/parse only changed
+    /// files. Metadata includes inode and ctime, not just coarse timestamps/size.
+    pub fn build_index_reusing(&self, previous: Option<&VaultIndex>) -> Result<VaultIndex> {
         let mut index = VaultIndex::default();
         let mut remaining = MAX_INDEX_TOTAL_BYTES;
+        let old: std::collections::HashMap<_, _> = previous
+            .into_iter()
+            .flat_map(|index| index.notes.iter())
+            .map(|note| (note.path.as_path(), note))
+            .collect();
         for entry in self.entries()? {
             if entry.is_dir
                 || !entry
                     .path
                     .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
             {
                 continue;
             }
-            let bytes = match self.read_bounded(&entry.path, MAX_INDEX_FILE_BYTES.min(remaining)) {
+            let absolute = self.existing_path(&entry.path)?;
+            let metadata = fs::metadata(&absolute).map_err(|error| io_error(&absolute, error))?;
+            let stamp = index::FileStamp::of(&metadata);
+            let limit = MAX_INDEX_FILE_BYTES.min(remaining);
+            if metadata.len() > limit {
+                index.skipped.push(entry.path);
+                continue;
+            }
+            if previous.and_then(|index| index.stamps.get(&entry.path)) == Some(&stamp)
+                && let Some(note) = old.get(entry.path.as_path())
+            {
+                remaining -= note.text.len() as u64;
+                index.notes.push((**note).clone());
+                index.stamps.insert(entry.path, stamp);
+                continue;
+            }
+            let bytes = match self.read_bounded(&entry.path, limit) {
                 Ok(bytes) => bytes,
                 Err(VaultError::TooLarge { .. }) => {
                     index.skipped.push(entry.path);
@@ -312,10 +339,22 @@ impl Vault {
                 }
                 Err(error) => return Err(error),
             };
+            let after = fs::metadata(&absolute).map_err(|error| io_error(&absolute, error))?;
             match String::from_utf8(bytes) {
                 Ok(text) => {
                     remaining -= text.len() as u64;
-                    index.notes.push(NoteMetadata::parse(entry.path, text));
+                    if stamp == index::FileStamp::of(&after) && text.len() as u64 == metadata.len()
+                    {
+                        index.stamps.insert(entry.path.clone(), stamp);
+                    }
+                    if let Some(note) = old
+                        .get(entry.path.as_path())
+                        .filter(|note| note.text.as_bytes() == text.as_bytes())
+                    {
+                        index.notes.push((**note).clone());
+                    } else {
+                        index.notes.push(NoteMetadata::parse(entry.path, text));
+                    }
                 }
                 Err(_) => index.skipped.push(entry.path),
             }
@@ -663,6 +702,47 @@ mod move_tests {
             vault
                 .move_entry(Path::new("to/nested/я.md"), Path::new("../escape.md"))
                 .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod index_cache_tests {
+    use super::*;
+    #[test]
+    fn unchanged_note_sources_are_shared_and_atomic_replacements_are_reindexed() {
+        let directory = tempfile::tempdir().unwrap();
+        let vault = Vault::open(directory.path()).unwrap();
+        vault.create(Path::new("a.md"), b"# old\n").unwrap();
+        vault.create(Path::new("b.md"), b"# keep\n").unwrap();
+        let first = vault.build_index().unwrap();
+        let second = vault.build_index_reusing(Some(&first)).unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &first.notes[0].text,
+            &second.notes[0].text
+        ));
+        assert!(std::sync::Arc::ptr_eq(
+            &first.notes[1].text,
+            &second.notes[1].text
+        ));
+        vault
+            .save(Path::new("a.md"), b"# old\n", b"# new\n")
+            .unwrap();
+        let changed = vault.build_index_reusing(Some(&second)).unwrap();
+        assert_eq!(&*changed.notes[0].text, "# new\n");
+        assert_eq!(changed.notes[0].title, "new");
+        assert!(std::sync::Arc::ptr_eq(
+            &second.notes[1].text,
+            &changed.notes[1].text
+        ));
+        vault.remove(Path::new("b.md"), false).unwrap();
+        assert_eq!(
+            vault
+                .build_index_reusing(Some(&changed))
+                .unwrap()
+                .notes
+                .len(),
+            1
         );
     }
 }

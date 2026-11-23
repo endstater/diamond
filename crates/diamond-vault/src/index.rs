@@ -28,7 +28,7 @@ pub struct NoteMetadata {
     pub links: Vec<String>,
     pub tasks: Vec<TaskMetadata>,
     /// Original UTF-8 source, used by the initial full-text search.
-    pub text: String,
+    pub text: std::sync::Arc<str>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -36,6 +36,27 @@ pub struct VaultIndex {
     pub notes: Vec<NoteMetadata>,
     /// Non-UTF-8 or oversized Markdown files excluded from the index.
     pub skipped: Vec<PathBuf>,
+    pub(crate) stamps: std::collections::HashMap<PathBuf, FileStamp>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileStamp {
+    len: u64,
+    dev: u64,
+    ino: u64,
+    mtime: (i64, i64),
+    ctime: (i64, i64),
+}
+impl FileStamp {
+    pub(crate) fn of(metadata: &std::fs::Metadata) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            len: metadata.len(),
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+            mtime: (metadata.mtime(), metadata.mtime_nsec()),
+            ctime: (metadata.ctime(), metadata.ctime_nsec()),
+        }
+    }
 }
 
 impl VaultIndex {
@@ -141,7 +162,7 @@ impl NoteMetadata {
             tags: Vec::new(),
             links: Vec::new(),
             tasks: Vec::new(),
-            text,
+            text: text.into(),
         };
         let lines: Vec<&str> = note.text.lines().collect();
         let frontmatter_end = if lines.first().is_some_and(|line| line.trim() == "---") {
@@ -198,7 +219,7 @@ impl NoteMetadata {
             extract_inline_metadata(trimmed, &mut tags, &mut links);
         }
         let document = diamond_document::Document::parse(&note.text);
-        let map = document.source_map();
+        let map = document.source_map_shared();
         for (block, span) in document.blocks().iter().zip(&map.blocks) {
             if let diamond_document::BlockKind::Task(checked) = block.kind {
                 let byte = note
@@ -334,6 +355,7 @@ mod tests {
                 NoteMetadata::parse(PathBuf::from("other/c.md"), "[[Бета]] [[b|alias]]".into()),
             ],
             skipped: Vec::new(),
+            ..Default::default()
         };
         assert_eq!(index.search("БЕТА проект").len(), 1);
         assert_eq!(index.search("alpha missing").len(), 0);
@@ -350,6 +372,7 @@ mod tests {
                 NoteMetadata::parse(PathBuf::from("origin.md"), "[[a]]".into()),
             ],
             skipped: Vec::new(),
+            ..Default::default()
         };
         assert_eq!(index.resolve_link(Path::new("origin.md"), "a"), None);
         assert!(index.backlinks(Path::new("one/a.md")).is_empty());

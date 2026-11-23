@@ -52,7 +52,7 @@ impl Document {
         if table.columns.is_empty() || column >= table.columns.len() {
             return Err("Column no longer exists".into());
         }
-        let map = self.source_map();
+        let map = self.source_map_shared();
         let span = map
             .blocks
             .get(index)

@@ -41,3 +41,11 @@ Directory moves retarget open buffers and image loaders. File CLI arguments use 
 light session without directory enumeration or a watcher/index. Notifications
 expire after three seconds with a one-shot repaint deadline, not a polling loop.
 See packaging/PKGBUILD.local for an Arch package built from the current checkout.
+
+0.7.2 adds optional DIAMOND_PROFILE=1 GUI update timings, without scheduling any
+extra repaint/timer. Spinners/progress animation stop animating in an unfocused
+window. Tree row painting skips clipped rows and drag payloads are allocated only
+on drag start. The current vault index is shared with its worker; unchanged note
+text is reused between event-triggered index builds. Appearance accepts #RRGGBB,
+committed on Enter or focus loss; incomplete/invalid values leave the accent
+unchanged. See docs/PERFORMANCE.md for scope and runtime verification.

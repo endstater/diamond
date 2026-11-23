@@ -2,6 +2,7 @@
 mod icons;
 mod plugin_preview;
 mod portal;
+mod profile;
 mod resources;
 mod session;
 mod settings_ui;
@@ -162,6 +163,7 @@ struct Replacement {
 
 struct DiamondApp {
     session: Session,
+    profile: Option<profile::FrameProfile>,
     settings: AppSettings,
     panel: Panel,
     message: Option<String>,
@@ -206,7 +208,7 @@ struct DiamondApp {
     vault_search_cache: Option<(String, SearchOptions, Result<SearchPattern, String>)>,
     pending: Option<PendingAction>,
     allow_close: bool,
-    index: Option<VaultIndex>,
+    index: Option<std::sync::Arc<VaultIndex>>,
     index_receiver: Option<Receiver<Result<VaultIndex, String>>>,
     plugin_path: String,
     plugin_manifest: Option<PluginManifest>,
@@ -236,6 +238,7 @@ impl DiamondApp {
             .or_else(|| settings.last_vault.clone());
         let mut app = Self {
             session: Session::default(),
+            profile: profile::FrameProfile::from_env(),
             settings,
             panel: Panel::Files,
             message: message.or(font_error),
@@ -413,7 +416,7 @@ impl DiamondApp {
             self.choose_vault(ui.ctx());
         }
         if self.portal_receiver.is_some() {
-            ui.spinner();
+            quiet_spinner(ui);
         }
         ui.add_space(16.0);
         let current = self
@@ -626,9 +629,10 @@ impl DiamondApp {
         };
         let (sender, receiver) = mpsc::channel();
         let ctx = ctx.clone();
+        let previous = self.index.clone();
         std::thread::spawn(move || {
             let result = Vault::open(root)
-                .and_then(|vault| vault.build_index())
+                .and_then(|vault| vault.build_index_reusing(previous.as_deref()))
                 .map_err(|e| e.to_string());
             let _ = sender.send(result);
             ctx.request_repaint();
@@ -644,7 +648,7 @@ impl DiamondApp {
                 Ok(result) => {
                     match result {
                         Ok(index) => {
-                            self.index = Some(index);
+                            self.index = Some(std::sync::Arc::new(index));
                             self.index_generation = self.index_generation.wrapping_add(1);
                         }
                         Err(e) => self.message = Some(e),
@@ -961,7 +965,7 @@ impl DiamondApp {
                             .size(theme::ui_size(ui, 14.0)),
                     );
                     if self.index_receiver.is_some() {
-                        ui.spinner();
+                        quiet_spinner(ui);
                     }
                     if let Some(index) = &self.index {
                         ui.add_space(8.0);
@@ -1220,7 +1224,9 @@ impl DiamondApp {
                             open = Some(entry.path.clone());
                         }
                     }
-                    response.dnd_set_drag_payload(entry.path.clone());
+                    if response.drag_started() {
+                        response.dnd_set_drag_payload(entry.path.clone());
+                    }
                     if entry.is_dir {
                         if response.dnd_hover_payload::<PathBuf>().is_some() {
                             ui.painter().rect_stroke(
@@ -1486,7 +1492,7 @@ impl DiamondApp {
             ));
         }
         if self.plugin_install_receiver.is_some() {
-            ui.spinner();
+            quiet_spinner(ui);
         }
         ui.add_space(12.0);
         let mut selected = None;
@@ -1517,7 +1523,7 @@ impl DiamondApp {
             }
         });
         if self.plugin_busy {
-            ui.spinner();
+            quiet_spinner(ui);
         }
         if self.plugin_worker.is_some() {
             ui.add_space(12.0);
@@ -1794,42 +1800,29 @@ impl DiamondApp {
                     if let Some(note) = index.note(&tab.path) {
                         ui.add_space(24.0);
                         section_title(ui, tr("Задачи"));
-                        let tasks: Vec<_> = tab
+                        let (done, total) = tab
                             .editor
                             .document()
                             .filter(|_| tab.editor.mode() == EditorMode::Formatted)
-                            .map(|document| {
-                                document
-                                    .blocks()
-                                    .iter()
-                                    .filter_map(|block| {
-                                        if let diamond_document::BlockKind::Task(checked) =
-                                            block.kind
-                                        {
-                                            Some(checked)
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect()
-                            })
+                            .map(diamond_document::Document::task_progress)
                             .unwrap_or_else(|| {
-                                note.tasks.iter().map(|task| task.checked).collect()
+                                (
+                                    note.tasks.iter().filter(|task| task.checked).count(),
+                                    note.tasks.len(),
+                                )
                             });
-                        let done = tasks.iter().filter(|checked| **checked).count();
                         ui.label(
                             RichText::new(lang.message(
                                 "{done} of {count} completed",
-                                &[
-                                    ("done", done.to_string()),
-                                    ("count", tasks.len().to_string()),
-                                ],
+                                &[("done", done.to_string()), ("count", total.to_string())],
                             ))
                             .size(theme::ui_size(ui, 14.0)),
                         );
-                        if !tasks.is_empty() {
-                            let target = done as f32 / tasks.len() as f32;
-                            let value = if self.settings.reduced_motion {
+                        if total > 0 {
+                            let target = done as f32 / total as f32;
+                            let value = if self.settings.reduced_motion
+                                || !ctx.input(|input| input.focused)
+                            {
                                 target
                             } else {
                                 ctx.animate_value_with_time(
@@ -2613,6 +2606,7 @@ impl eframe::App for DiamondApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let lang = self.settings.language;
         let tr = |key| lang.text(key);
+        let profile_start = self.profile.as_ref().map(|_| Instant::now());
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             if !self.quit_after_plugin {
@@ -2640,7 +2634,7 @@ impl eframe::App for DiamondApp {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(100.0);
-                    ui.spinner();
+                    quiet_spinner(ui);
                     ui.label(tr("Останавливаем плагин перед выходом…"));
                 });
             });
@@ -2697,6 +2691,9 @@ impl eframe::App for DiamondApp {
         }
         if let Some(delay) = self.session.next_autosave_in(Instant::now()) {
             ctx.request_repaint_after(delay);
+        }
+        if let (Some(profile), Some(start)) = (&mut self.profile, profile_start) {
+            profile.record(start.elapsed());
         }
     }
 }
@@ -2767,6 +2764,9 @@ fn file_row(
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::SelectableLabel, ui.is_enabled(), label)
     });
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
     if selected || response.hovered() {
         ui.painter().rect_filled(
             rect,
@@ -2834,4 +2834,12 @@ fn expand_user_path(path: PathBuf) -> PathBuf {
         return PathBuf::from(home).join(relative);
     }
     path
+}
+
+fn quiet_spinner(ui: &mut egui::Ui) {
+    if ui.input(|input| input.focused) {
+        ui.spinner();
+    } else {
+        ui.label("…");
+    }
 }

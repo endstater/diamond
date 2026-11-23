@@ -22,6 +22,17 @@ pub fn syntax_licenses() -> &'static str {
 mod math_normalize;
 mod media;
 pub use media::Loader as ImageLoader;
+pub fn invalidate_font_layouts(ctx: &egui::Context) {
+    ctx.data_mut(|data| {
+        let key = egui::Id::new("font-layout-epoch");
+        let next = data.get_temp::<u64>(key).unwrap_or(0).wrapping_add(1);
+        data.insert_temp(key, next);
+    });
+}
+pub(crate) fn font_epoch(ctx: &egui::Context) -> u64 {
+    ctx.data(|data| data.get_temp::<u64>(egui::Id::new("font-layout-epoch")))
+        .unwrap_or(0)
+}
 pub fn decode_preview_png(bytes: &[u8]) -> Result<egui::ColorImage, String> {
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("Preview pages must be PNG".into());
@@ -290,11 +301,9 @@ impl EditorBuffer {
 
     pub fn bytes(&self) -> Result<Vec<u8>, EditorError> {
         match self.mode {
-            EditorMode::Formatted => Ok(self
-                .document
-                .as_ref()
-                .map_or_else(String::new, Document::to_markdown)
-                .into_bytes()),
+            EditorMode::Formatted => Ok(self.document.as_ref().map_or_else(Vec::new, |document| {
+                document.source_map_shared().source.as_bytes().to_vec()
+            })),
             EditorMode::Source => Ok(self.source.as_bytes().to_vec()),
             EditorMode::Image => Ok(self.original_bytes.clone()),
             EditorMode::Hex => {

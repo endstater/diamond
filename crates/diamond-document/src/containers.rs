@@ -195,7 +195,7 @@ pub struct Continuation {
 impl Document {
     /// An atomic source transaction for Enter. Source positions count scalars.
     pub fn line_continuation(&self, caret: usize) -> Option<Continuation> {
-        let map = self.source_map();
+        let map = self.source_map_shared();
         let byte = map
             .source
             .char_indices()

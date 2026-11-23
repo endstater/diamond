@@ -595,7 +595,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "diamond-app"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "ashpd",
  "base64",
@@ -616,7 +616,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-core"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "regex",
  "serde",
@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-document"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "pulldown-cmark",
  "thiserror 2.0.21",
@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-editor"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "diamond-core",
  "diamond-document",
@@ -662,7 +662,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-vault"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "diamond-document",
  "rustix 1.1.6",

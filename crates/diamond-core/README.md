@@ -10,3 +10,6 @@ Version 0.3 adds backward-compatible defaults for theme, accent, system font pre
 
 0.7 adds backward-compatible `show_sidebar` and `scroll_speed` preferences,
 pastel rainbow accent defaults and localized plugin/table/image controls.
+
+0.7.2 color::parse_hex validates six ASCII hexadecimal digits (optional #) for
+the appearance picker; incomplete, non-ASCII and invalid values are rejected.

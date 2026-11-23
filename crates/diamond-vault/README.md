@@ -21,3 +21,12 @@ tabs after a directory move. Nested task metadata now uses the semantic Markdown
 parser, excluding code blocks and including tasks beyond four spaces of indent.
 `read_bounded` is public so host image policy can enforce its smaller limit before
 allocation. Markdown remains authoritative and unrelated links are not rewritten.
+
+0.7.2 build_index_reusing reuses notes whose file identity/size/mtime/ctime still
+match their recorded stamp. Replacements and edits are read and parsed; unchanged
+source text is shared through Arc<str>, and identical newly read bytes reuse the
+old metadata too. Enumeration, byte budgets, symlink checks and UTF-8 exclusions
+remain enforced. A stamp is stored only if metadata remains stable across the
+read. This is a rebuildable metadata cache, never the byte authority for saves;
+conflict-aware save still compares actual loaded/disk bytes. Native notifications
+trigger this work; no periodic filesystem polling is introduced.

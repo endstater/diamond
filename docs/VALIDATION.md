@@ -151,6 +151,12 @@ installation on a network-enabled machine with a prepared public repository.
 
 ## 0.7.1 — 2026-11-23
 
+Portal build correction: ashpd 0.11.0 OpenFileRequest::title accepts
+Into<Option<&str>>, not an owned String. The worker now supplies
+Some(title.as_str()); the owned title remains alive throughout the request.
+The compiler-reported call is the only portal title setter in the app.
+This targeted source correction has not been compiled here.
+
 The user's Rust compiler exposed that `views` had been inserted into the
 `Commands` response DTO instead of `PluginHost`. The field now belongs to the
 host; removing it from the DTO also prevents v1 JSON responses from failing
@@ -174,3 +180,23 @@ On the target machine run cargo fmt --all, cargo test --workspace, cargo clippy
 --workspace --all-targets -- -D warnings and cargo run --release -p diamond-app.
 Verify launching the old uppercase plugin and v2 preview example, opening SVG
 in Image by default and switching to/from Hex without altering file bytes.
+
+## 0.7.2 — 2026-11-23
+
+Source-level performance changes are documented in PERFORMANCE.md. A newly
+selected execution environment was awaited and checked; it also has no cargo or
+rustc. No release build, Rust tests/clippy, native geometry verification, process
+CPU figures or speedup claim are made here.
+
+New Rust regressions cover shared map invalidation on edit/Undo/Redo, shared Undo
+snapshots, history grouping without reparsing the source map, cached nested task
+counts, blank-line/table height separation, quote content endpoints, retained
+projection/galley on inactive redraw, more than 24 retained math textures, the
+provided braced-array/relation shape, metadata cache reuse/atomic replacement and
+six-digit HEX parsing. Existing source round-trip, filesystem conflict and v1/v2
+plugin tests remain present. They are not run in this environment.
+
+Preparation checks: source/TOML/JSON/Python/SVG structure, Rust lexical delimiter
+balance, Python plugin subprocess fixtures, shell syntax and archive/update hash
+and backup/rollback verification. These cannot substitute for Rust type/borrow
+checking. The update includes the previous ashpd title type correction too.

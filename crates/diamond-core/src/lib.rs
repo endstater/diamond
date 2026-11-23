@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub mod color;
 pub mod i18n;
 pub mod search;
 pub use i18n::Language;
