@@ -7,6 +7,8 @@ use thiserror::Error;
 
 mod source_map;
 mod structures;
+mod containers;
+pub use containers::Continuation;
 
 pub use source_map::{BlockSourceMap, SourceMap};
 pub use structures::{Table, TableCell, CellAlignment, Image};
@@ -24,6 +26,8 @@ pub enum BlockKind {
     Rule,
     Table,
     Image,
+    Math,
+    Footnote,
     Code,
     Raw,
 }
@@ -50,6 +54,18 @@ pub struct Link {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MathSpan {pub range:Range<usize>,pub latex:String,pub display:bool}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FootnoteRef {pub range:Range<usize>,pub label:String,pub number:usize}
+
+struct Inline {
+    text:String,marks:Vec<Mark>,links:Vec<Link>,math:Vec<MathSpan>,footnotes:Vec<FootnoteRef>,
+}
+impl Inline {
+    fn apply(self,block:&mut Block){block.text=self.text;block.marks=self.marks;block.links=self.links;block.math=self.math;block.footnotes=self.footnotes;}
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
     pub kind: BlockKind,
     pub text: String,
@@ -57,6 +73,13 @@ pub struct Block {
     pub links: Vec<Link>,
     pub table: Option<Table>,
     pub image: Option<Image>,
+    pub math:Vec<MathSpan>,
+    pub footnotes:Vec<FootnoteRef>,
+    pub footnote_label:Option<String>,
+    pub footnote_number:Option<usize>,
+    pub indent:usize,
+    pub quote_depth:usize,
+    content_prefix:Option<usize>,
     original: Option<String>,
     ending: String,
     trailing: String,
@@ -83,6 +106,11 @@ impl Block {
         &self.language
     }
 
+    fn structural(&self)->bool {
+        self.indent>0 || self.quote_depth>1 || (self.quote_depth>0&&self.kind!=BlockKind::Quote)
+            || self.footnote_label.is_some() || !self.math.is_empty()
+    }
+
     fn empty() -> Self {
         Self {
             kind: BlockKind::Paragraph,
@@ -91,6 +119,7 @@ impl Block {
             links: Vec::new(),
             table: None,
             image: None,
+            math:Vec::new(),footnotes:Vec::new(),footnote_label:None,footnote_number:None,indent:0,quote_depth:0,content_prefix:None,
             original: None,
             ending: String::new(),
             trailing: String::new(),
@@ -134,7 +163,7 @@ impl Block {
                 format!("{fence}{}{newline}{text}{newline}{fence}", self.language)
             }
             BlockKind::Rule => "---".into(),
-            BlockKind::Table | BlockKind::Image => self.text.clone(),
+            BlockKind::Table | BlockKind::Image | BlockKind::Math | BlockKind::Footnote => self.text.clone(),
             BlockKind::Raw => self.text.clone(),
         };
         let mut result = body.replace("\r\n", "\n");
@@ -202,6 +231,13 @@ impl Document {
             });
             leading.clear();
         }
+        let mut numbers=std::collections::HashMap::<String,usize>::new();
+        for block in &mut blocks {for reference in &mut block.footnotes {
+            let next=numbers.len()+1;reference.number=*numbers.entry(reference.label.clone()).or_insert(next);
+        }}
+        for block in &mut blocks {if let Some(label)=&block.footnote_label {
+            let next=numbers.len()+1;block.footnote_number=Some(*numbers.entry(label.clone()).or_insert(next));
+        }}
         Self {
             state: State { blocks, leading, newline },
             undo: Vec::new(),
@@ -297,7 +333,7 @@ impl Document {
         let (last, last_offset) = self.locate(range.end);
         if self.state.blocks[first..=last]
             .iter()
-            .any(|block| matches!(block.kind, BlockKind::Raw | BlockKind::Table | BlockKind::Image) || !block.links.is_empty())
+            .any(|block| matches!(block.kind, BlockKind::Raw | BlockKind::Table | BlockKind::Image | BlockKind::Math | BlockKind::Footnote) || block.structural() || !block.links.is_empty())
         {
             return Err(DocumentError::RawBlock);
         }
@@ -386,7 +422,7 @@ impl Document {
             let start = range.start.saturating_sub(base).min(length);
             let end = range.end.saturating_sub(base).min(length);
             if start < end {
-                if matches!(block.kind, BlockKind::Raw | BlockKind::Code | BlockKind::Rule | BlockKind::Table | BlockKind::Image) || !block.links.is_empty() {
+                if matches!(block.kind, BlockKind::Raw | BlockKind::Code | BlockKind::Rule | BlockKind::Table | BlockKind::Image | BlockKind::Math | BlockKind::Footnote) || block.structural() || !block.links.is_empty() {
                     return Err(DocumentError::RawBlock);
                 }
                 let chars = block.text.chars().collect::<Vec<_>>();
@@ -455,7 +491,7 @@ impl Document {
             return Err(DocumentError::InvalidHeading);
         }
         let block = self.state.blocks.get(index).ok_or(DocumentError::InvalidBlock)?;
-        if matches!(block.kind,BlockKind::Raw|BlockKind::Table|BlockKind::Image) || matches!(kind,BlockKind::Raw|BlockKind::Table|BlockKind::Image) || !block.links.is_empty() {
+        if matches!(block.kind,BlockKind::Raw|BlockKind::Table|BlockKind::Image|BlockKind::Math|BlockKind::Footnote) || block.structural() || matches!(kind,BlockKind::Raw|BlockKind::Table|BlockKind::Image|BlockKind::Math|BlockKind::Footnote) || !block.links.is_empty() {
             return Err(DocumentError::RawBlock);
         }
         if block.kind == kind {
@@ -464,6 +500,7 @@ impl Document {
         let before = self.state.clone();
         let block = &mut self.state.blocks[index];
         block.kind = kind;
+        block.quote_depth=usize::from(block.kind==BlockKind::Quote);block.content_prefix=None;
         if block.kind == BlockKind::Code {
             block.marks.clear();
         }
@@ -571,7 +608,8 @@ fn parser(source: &str) -> Parser<'_> {
         Options::ENABLE_STRIKETHROUGH
             | Options::ENABLE_TABLES
             | Options::ENABLE_TASKLISTS
-            | Options::ENABLE_FOOTNOTES
+            | Options::ENABLE_OLD_FOOTNOTES
+            | Options::ENABLE_MATH
             | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
             | Options::ENABLE_WIKILINKS,
     )
@@ -610,8 +648,10 @@ fn parse_fragment(source: &str) -> Vec<Block> {
     let first = parser(source).next();
     if let Some(image) = structures::parse_image(source) { return vec![image]; }
     if matches!(first, Some(Event::Start(Tag::List(_)))) {
-        return parse_flat_list(source).unwrap_or_else(|| vec![Block::raw(source)]);
+        return containers::lines(source,false);
     }
+    if matches!(first,Some(Event::Start(Tag::BlockQuote(_)))) {return containers::lines(source,true);}
+    let footnote_label=if let Some(Event::Start(Tag::FootnoteDefinition(label)))=&first {Some(label.to_string())}else{None};
     let kind = match first {
         Some(Event::Start(Tag::Paragraph)) => BlockKind::Paragraph,
         Some(Event::Start(Tag::Heading { level, .. })) => BlockKind::Heading(level as u8),
@@ -619,10 +659,12 @@ fn parse_fragment(source: &str) -> Vec<Block> {
         Some(Event::Start(Tag::CodeBlock(_))) => BlockKind::Code,
         Some(Event::Rule) => BlockKind::Rule,
         Some(Event::Start(Tag::Table(_))) => BlockKind::Table,
+        Some(Event::Start(Tag::FootnoteDefinition(_)))=>BlockKind::Footnote,
+        Some(Event::DisplayMath(_))=>BlockKind::Math,
         _ => return vec![Block::raw(source)],
     };
     let mut block = Block {
-        kind,
+        kind,footnote_label,
         original: Some(source.to_owned()),
         ending: ending(source).to_owned(),
         ..Block::empty()
@@ -645,10 +687,9 @@ fn parse_fragment(source: &str) -> Vec<Block> {
         }
     } else if block.kind == BlockKind::Rule {
         // A structural block has no editable semantic text.
-    } else if let Some((text, marks, links)) = parse_inline(source, &block.kind) {
-        block.text = text;
-        block.marks = marks;
-        block.links = links;
+    } else if let Some(inline) = parse_inline(source, &block.kind) {
+        inline.apply(&mut block);
+        if block.math.len()==1&&block.math[0].display&&block.text=="◇" {block.kind=BlockKind::Math;}
         if block.kind == BlockKind::Table {block.table=Some(structures::table(source, &block.text));}
     } else {
         return vec![Block::raw(source)];
@@ -656,74 +697,13 @@ fn parse_fragment(source: &str) -> Vec<Block> {
     vec![block]
 }
 
-fn parse_flat_list(source: &str) -> Option<Vec<Block>> {
-    let mut blocks: Vec<Block> = Vec::new();
-    for line in source.split_inclusive('\n') {
-        if line.trim().is_empty() {
-            if let Some(last) = blocks.last_mut() { last.trailing.push_str(line); }
-            else { blocks.push(Block::raw(line)); }
-            continue;
-        }
-        match parse_list_line(line) {
-            Some(block) => blocks.push(block),
-            None => blocks.push(Block::raw(line)),
-        }
-    }
-    (!blocks.is_empty()).then_some(blocks)
-}
-
-fn parse_list_line(line: &str) -> Option<Block> {
-        let content = line.trim_end_matches(['\r', '\n']);
-        let (mut kind, order, mut body) = if let Some(body) = content
-            .strip_prefix("- ")
-            .or_else(|| content.strip_prefix("* "))
-            .or_else(|| content.strip_prefix("+ "))
-            .or_else(|| matches!(content, "-" | "*" | "+").then_some(""))
-        {
-            (BlockKind::Bullet, 1, body)
-        } else {
-            let digits = content.bytes().take_while(u8::is_ascii_digit).count();
-            if digits == 0 {
-                return None;
-            }
-            let remainder = &content[digits..];
-            let body = remainder
-                .strip_prefix(". ")
-                .or_else(|| remainder.strip_prefix(") "))?;
-            (BlockKind::Ordered, content[..digits].parse().ok()?, body)
-        };
-        {
-            if let Some(rest) = body.strip_prefix("[ ] ").or_else(|| (body == "[ ]").then_some("")) {
-                kind = BlockKind::Task(false);
-                body = rest;
-            } else if let Some(rest) = body
-                .strip_prefix("[x] ")
-                .or_else(|| body.strip_prefix("[X] "))
-                .or_else(|| matches!(body, "[x]" | "[X]").then_some(""))
-            {
-                kind = BlockKind::Task(true);
-                body = rest;
-            }
-        }
-        let (text, marks, links) = parse_inline(body, &BlockKind::Paragraph)?;
-        Some(Block {
-            kind,
-            text,
-            marks,
-            links,
-            original: Some(line.to_owned()),
-            ending: ending(line).to_owned(),
-            order,
-            ..Block::empty()
-        })
-}
-
-fn parse_inline(source: &str, kind: &BlockKind) -> Option<(String, Vec<Mark>, Vec<Link>)> {
+fn parse_inline(source: &str, kind: &BlockKind) -> Option<Inline> {
     let mut text = String::new();
     let mut marks = Vec::new();
     let mut stack = Vec::new();
     let mut links = Vec::new();
     let mut link_stack = Vec::new();
+    let mut math=Vec::new();let mut footnotes=Vec::new();
     let mut paragraphs = 0;
     let mut headings = 0;
     let mut quotes = 0;
@@ -738,8 +718,18 @@ fn parse_inline(source: &str, kind: &BlockKind) -> Option<(String, Vec<Mark>, Ve
             Event::End(TagEnd::Table) if *kind == BlockKind::Table => {
                 if text.ends_with('\n') {text.pop();position=position.saturating_sub(1);}
             },
+            Event::Start(Tag::FootnoteDefinition(_)) if *kind==BlockKind::Footnote=>{},
+            Event::End(TagEnd::FootnoteDefinition) if *kind==BlockKind::Footnote=>{if text.ends_with('\n'){text.pop();position=position.saturating_sub(1);}},
             Event::Start(Tag::Paragraph) => paragraphs += 1,
-            Event::End(TagEnd::Paragraph) => {}
+            Event::End(TagEnd::Paragraph) => {if *kind==BlockKind::Footnote {text.push('\n');position+=1;}},
+            Event::InlineMath(value)=>{math.push(MathSpan{range:position..position+1,latex:value.to_string(),display:false});text.push('◇');position+=1;},
+            Event::DisplayMath(value)=>{math.push(MathSpan{range:position..position+1,latex:value.to_string(),display:true});text.push('◇');position+=1;},
+            Event::FootnoteReference(label)=>{
+                let label=label.to_string();
+                footnotes.push(FootnoteRef{range:position..position+1,label:label.clone(),number:0});
+                links.push(Link{range:position..position+1,target:format!("diamond-footnote:{label}")});
+                text.push('⁎');position+=1;
+            },
             Event::Start(Tag::Heading { .. }) => headings += 1,
             Event::End(TagEnd::Heading(_)) => {}
             Event::Start(Tag::BlockQuote(_)) => quotes += 1,
@@ -785,11 +775,11 @@ fn parse_inline(source: &str, kind: &BlockKind) -> Option<(String, Vec<Mark>, Ve
         BlockKind::Paragraph => paragraphs <= 1 && headings == 0 && quotes == 0,
         BlockKind::Heading(_) => paragraphs == 0 && headings == 1 && quotes == 0,
         BlockKind::Quote => paragraphs <= 1 && headings == 0 && quotes == 1,
-        BlockKind::Table => true,
+        BlockKind::Table | BlockKind::Math | BlockKind::Footnote => true,
         _ => false,
     };
     structures::bare_links(&text, &marks, &mut links);
-    valid.then_some((text, marks, links))
+    valid.then_some(Inline{text,marks,links,math,footnotes})
 }
 
 fn ending(source: &str) -> &str {
@@ -983,6 +973,57 @@ fn trailing_newlines(text: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_mixed_lists_and_tasks_keep_their_levels_and_original_bytes() {
+        let source="- root\r\n  - child\r\n    - [x] 你好\r\n  1. numbered\r\n  2. second\r\n- tail\r\n";
+        let mut document=Document::parse(source);
+        assert_eq!(document.blocks().iter().map(|block|block.indent).collect::<Vec<_>>(),vec![0,2,4,2,2,0]);
+        assert_eq!(document.blocks()[2].kind,BlockKind::Task(true));
+        assert!(document.source_map().blocks.iter().all(|block|block.is_exact));
+        assert_eq!(document.to_markdown(),source);
+        document.toggle_task(2).unwrap();assert!(document.to_markdown().contains("    - [ ] 你好"));
+        assert!(document.undo());assert_eq!(document.to_markdown(),source);
+    }
+
+    #[test]
+    fn multiline_and_nested_quotes_have_exact_content_coordinates() {
+        let source="> first\n>\n> **second** with `code`\n>> nested\n>>> deep\n";
+        let document=Document::parse(source);
+        assert_eq!(document.blocks().iter().map(|block|block.quote_depth).collect::<Vec<_>>(),vec![1,1,1,2,3]);
+        assert_eq!(document.blocks()[1].text,"");assert_eq!(document.blocks()[2].text,"second with code");
+        assert_eq!(document.blocks()[4].text,"deep");
+        assert!(document.source_map().blocks.iter().all(|block|block.is_exact));
+        assert_eq!(document.to_markdown(),source);
+    }
+
+    #[test]
+    fn enter_continues_markers_and_exits_or_outdents_empty_items() {
+        for (source,expected) in [("9. item","9. item\n10. "),("2) item","2) item\n3) "),
+            ("  - [x] item","  - [x] item\n  - [ ] "),("* item","* item\n* "),
+            ("- first\n- ","- first\n"),("- parent\n  - ","- parent\n- "),
+            ("> - item","> - item\n> - "),("> quote","> quote\n> ")] {
+            let mut document=Document::parse(source);let caret=source.chars().count();
+            let continuation=document.line_continuation(caret).unwrap();
+            document.replace_source_range(continuation.range,&continuation.text).unwrap();assert_eq!(document.to_markdown(),expected);
+            assert!(document.undo());assert_eq!(document.to_markdown(),source);
+        }
+        let code=Document::parse("```text\n- item\n```");
+        assert!(code.line_continuation(14).is_none());
+    }
+
+    #[test]
+    fn latex_and_footnotes_are_semantic_objects_with_lossless_sources() {
+        let source="Equation $x^2+\\frac{1}{2}$ and note[^word]. Again[^word].\n\n$$\n\\sqrt{x}\n$$\n\n[^word]: A **formatted** definition.\n\n    Another paragraph.\n";
+        let document=Document::parse(source);
+        assert_eq!(document.blocks()[0].math[0].latex,r"x^2+\frac{1}{2}");
+        assert_eq!(document.blocks()[0].footnotes[0].number,1);assert_eq!(document.blocks()[0].footnotes[1].number,1);
+        assert!(document.blocks().iter().any(|block|block.kind==BlockKind::Math));
+        let definition=document.blocks().iter().find(|block|block.footnote_label.as_deref()==Some("word")).unwrap();
+        assert_eq!(definition.footnote_number,Some(1));assert!(definition.text.contains("formatted"));
+        assert!(document.source_map().blocks.iter().all(|block|block.is_exact));
+        assert_eq!(document.to_markdown(),source);
+    }
 
     #[test]
     fn partial_and_loose_lists_do_not_demote_completed_items() {

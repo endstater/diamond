@@ -1,0 +1,30 @@
+Diamond 0.6.0 — update patch
+
+Base: https://github.com/endstater/diamond
+Commit: 1a495d05518e439f7df73a3d7609ad6b6f2c98ce
+No GitHub writes or pushes were performed.
+
+From your Diamond repository, substitute the actual downloaded patch path:
+
+    git apply --check /path/to/diamond-0.6.0.patch
+    git apply /path/to/diamond-0.6.0.patch
+    cargo fmt --all
+    cargo build --release -p diamond-app
+
+Run ./target/release/diamond after a successful build.
+Keep target and Cargo.lock. The patch does not include either of them.
+Cargo must resolve the new latex-rust 2.1.1 dependency on the first build.
+No git add/commit/push is performed by these commands.
+
+Implemented: nested mixed lists/tasks, multiline/nested quotes, list/quote
+continuation in Live and Markdown Source, $inline$ / $$display$$ mathematical
+LaTeX, first-use footnote numbering and Ctrl+click definition navigation,
+code-language headings/reserved gaps, larger stable task controls with a hand
+cursor, solid checked circle and tick. Includes examples/vault/Markdown 0.6.md.
+Complex embedded blocks inside containers and full TeX packages are not claimed.
+
+Validation: structure, SVG/license assets, Python plugin smoke, shell syntax,
+Rust lexical balance; git apply --check --index against exact pinned baseline,
+and byte-for-byte verification of all 22 resulting files. Rust compilation,
+102 Rust tests, rustfmt, Clippy and native GUI behavior have NOT been run here:
+Cargo is unavailable in the preparation environment.

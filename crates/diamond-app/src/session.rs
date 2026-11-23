@@ -13,26 +13,36 @@ pub struct Tab {
     last_edit: Option<Instant>,
     autosave_error: Option<String>,
     composing: bool,
-    dirty_cache: std::cell::Cell<Option<((u64,u64),bool)>>,
+    dirty_cache: std::cell::Cell<Option<((u64, u64), bool)>>,
 }
 
 impl Tab {
     pub fn is_dirty(&self) -> bool {
-        let key=self.editor.revision_key();
-        if let Some((cached,dirty))=self.dirty_cache.get() {
-            if cached==key{return dirty}
+        let key = self.editor.revision_key();
+        if let Some((cached, dirty)) = self.dirty_cache.get() {
+            if cached == key {
+                return dirty;
+            }
         }
-        let dirty=!self.editor.bytes().is_ok_and(|bytes|bytes==self.loaded);
-        self.dirty_cache.set(Some((key,dirty)));dirty
+        let dirty = !self.editor.bytes().is_ok_and(|bytes| bytes == self.loaded);
+        self.dirty_cache.set(Some((key, dirty)));
+        dirty
     }
 
     pub fn title(&self) -> String {
-        self.path.file_name().unwrap_or_default().to_string_lossy().into_owned()
+        self.path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
     }
 
     pub fn autosaves(&self) -> bool {
         self.editor.mode() == EditorMode::Formatted
-            && self.path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+            && self
+                .path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
     }
 
     pub fn autosave_error(&self) -> Option<&str> {
@@ -80,21 +90,41 @@ impl Session {
     }
 
     pub fn rename_file(&mut self, path: &Path, name: &Path) -> Result<(), String> {
-        let candidate=path.parent().unwrap_or(Path::new("")).join(name);
-        if self.tabs.iter().any(|tab|tab.path!=path && tab.path==candidate) {return Err("The target file is already open".into());}
+        let candidate = path.parent().unwrap_or(Path::new("")).join(name);
+        if self
+            .tabs
+            .iter()
+            .any(|tab| tab.path != path && tab.path == candidate)
+        {
+            return Err("The target file is already open".into());
+        }
         self.deactivate_active(Instant::now());
-        let target = self.vault.as_ref().ok_or("Open a vault first")?.rename_file(path, name).map_err(|error| error.to_string())?;
+        let target = self
+            .vault
+            .as_ref()
+            .ok_or("Open a vault first")?
+            .rename_file(path, name)
+            .map_err(|error| error.to_string())?;
         for tab in &mut self.tabs {
-            if tab.path == path {tab.path = target.clone(); tab.editor.retarget_path(&target);}
+            if tab.path == path {
+                tab.path = target.clone();
+                tab.editor.retarget_path(&target);
+            }
         }
         self.refresh()
     }
 
     pub fn delete_entry(&mut self, path: &Path, directory: bool) -> Result<(), String> {
-        self.vault.as_ref().ok_or("Open a vault first")?.remove(path, directory).map_err(|e| e.to_string())?;
+        self.vault
+            .as_ref()
+            .ok_or("Open a vault first")?
+            .remove(path, directory)
+            .map_err(|e| e.to_string())?;
         let active_path = self.tabs.get(self.active).map(|tab| tab.path.clone());
-        self.tabs.retain(|tab| !(tab.path == path || (directory && tab.path.starts_with(path))));
-        self.active = active_path.and_then(|active| self.tabs.iter().position(|tab| tab.path == active))
+        self.tabs
+            .retain(|tab| !(tab.path == path || (directory && tab.path.starts_with(path))));
+        self.active = active_path
+            .and_then(|active| self.tabs.iter().position(|tab| tab.path == active))
             .unwrap_or_else(|| self.active.min(self.tabs.len().saturating_sub(1)));
         self.refresh()
     }
@@ -107,11 +137,15 @@ impl Session {
         let vault = self.vault.as_ref().ok_or("Open a vault first")?;
         let loaded = vault.read(path).map_err(|e| e.to_string())?;
         let mut editor = EditorBuffer::for_path(path, &loaded);
-        editor.set_image_loader(crate::resources::image_loader(vault.clone(),path.into()));
+        editor.set_image_loader(crate::resources::image_loader(vault.clone(), path.into()));
         self.cancel_tab_composition(self.active, Instant::now());
         self.tabs.push(Tab {
-            path: path.to_path_buf(), loaded, editor,
-            last_edit: None, autosave_error: None, composing: false,
+            path: path.to_path_buf(),
+            loaded,
+            editor,
+            last_edit: None,
+            autosave_error: None,
+            composing: false,
             dirty_cache: std::cell::Cell::new(None),
         });
         self.active = self.tabs.len() - 1;
@@ -135,14 +169,16 @@ impl Session {
         }
     }
 
-    pub fn deactivate_active(&mut self,now:Instant) {
-        self.cancel_tab_composition(self.active,now);
+    pub fn deactivate_active(&mut self, now: Instant) {
+        self.cancel_tab_composition(self.active, now);
     }
 
     pub fn create_note(&mut self, path: &Path) -> Result<(), String> {
         let vault = self.vault.as_ref().ok_or("Open a vault first")?;
         let title = path.file_stem().unwrap_or_default().to_string_lossy();
-        vault.create(path, format!("# {title}\n\n").as_bytes()).map_err(|e| e.to_string())?;
+        vault
+            .create(path, format!("# {title}\n\n").as_bytes())
+            .map_err(|e| e.to_string())?;
         self.refresh()?;
         self.open_file(path)
     }
@@ -154,7 +190,9 @@ impl Session {
             return Err("Завершите ввод текста через IME перед сохранением".into());
         }
         let bytes = tab.editor.bytes().map_err(|e| e.to_string())?;
-        vault.save(&tab.path, &tab.loaded, &bytes).map_err(|e| e.to_string())?;
+        vault
+            .save(&tab.path, &tab.loaded, &bytes)
+            .map_err(|e| e.to_string())?;
         tab.loaded = bytes;
         tab.dirty_cache.set(None);
         tab.last_edit = None;
@@ -181,22 +219,37 @@ impl Session {
     }
 
     pub fn next_autosave_in(&self, now: Instant) -> Option<Duration> {
-        self.tabs.iter().filter(|tab| {
-            tab.autosaves() && !tab.composing && tab.autosave_error.is_none() && tab.is_dirty()
-        }).filter_map(|tab| tab.last_edit.map(|edited| {
-            AUTOSAVE_DELAY.saturating_sub(now.saturating_duration_since(edited))
-        })).min()
+        self.tabs
+            .iter()
+            .filter(|tab| {
+                tab.autosaves() && !tab.composing && tab.autosave_error.is_none() && tab.is_dirty()
+            })
+            .filter_map(|tab| {
+                tab.last_edit.map(|edited| {
+                    AUTOSAVE_DELAY.saturating_sub(now.saturating_duration_since(edited))
+                })
+            })
+            .min()
     }
 
     /// Persist debounced formatted Markdown using the same byte conflict check
     /// as manual saves. Failed documents stay dirty and do not retry silently.
     pub fn autosave_due(&mut self, now: Instant) -> AutosaveReport {
-        let due: Vec<usize> = self.tabs.iter().enumerate().filter_map(|(index, tab)| {
-            (tab.autosaves() && !tab.composing && tab.autosave_error.is_none() && tab.is_dirty()
-                && tab.last_edit.is_some_and(|edited| {
-                    now.saturating_duration_since(edited) >= AUTOSAVE_DELAY
-                })).then_some(index)
-        }).collect();
+        let due: Vec<usize> = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter_map(|(index, tab)| {
+                (tab.autosaves()
+                    && !tab.composing
+                    && tab.autosave_error.is_none()
+                    && tab.is_dirty()
+                    && tab.last_edit.is_some_and(|edited| {
+                        now.saturating_duration_since(edited) >= AUTOSAVE_DELAY
+                    }))
+                .then_some(index)
+            })
+            .collect();
         let mut report = AutosaveReport::default();
         for index in due {
             match self.save(index) {
@@ -222,8 +275,11 @@ impl Session {
         for index in targets {
             self.cancel_tab_composition(index, now);
         }
-        let eligible: Vec<usize> = self.dirty_tabs(action).into_iter()
-            .filter(|&index| self.tabs[index].autosaves()).collect();
+        let eligible: Vec<usize> = self
+            .dirty_tabs(action)
+            .into_iter()
+            .filter(|&index| self.tabs[index].autosaves())
+            .collect();
         let mut saved = 0;
         for index in eligible {
             if let Some(error) = self.tabs[index].autosave_error.clone() {
@@ -241,37 +297,57 @@ impl Session {
 
     pub fn dirty_tabs(&self, action: PendingAction) -> Vec<usize> {
         match action {
-            PendingAction::CloseTab(index) => self.tabs.get(index).filter(|t| t.is_dirty())
-                .map(|_| vec![index]).unwrap_or_default(),
-            PendingAction::SwitchVault | PendingAction::Quit => self.tabs.iter().enumerate()
-                .filter_map(|(i, tab)| tab.is_dirty().then_some(i)).collect(),
+            PendingAction::CloseTab(index) => self
+                .tabs
+                .get(index)
+                .filter(|t| t.is_dirty())
+                .map(|_| vec![index])
+                .unwrap_or_default(),
+            PendingAction::SwitchVault | PendingAction::Quit => self
+                .tabs
+                .iter()
+                .enumerate()
+                .filter_map(|(i, tab)| tab.is_dirty().then_some(i))
+                .collect(),
         }
     }
 
     pub fn close_tab(&mut self, index: usize) {
         if index < self.tabs.len() {
             self.tabs.remove(index);
-            if self.active > index { self.active -= 1; }
+            if self.active > index {
+                self.active -= 1;
+            }
             self.active = self.active.min(self.tabs.len().saturating_sub(1));
         }
     }
 }
 
 pub fn config_path() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME").filter(|p| !p.is_empty()).map(PathBuf::from)
+    std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")))
         .map(|p| p.join("diamond/settings.json"))
 }
 
 pub fn load_settings() -> (diamond_core::AppSettings, Option<String>) {
-    let Some(path) = config_path() else { return (Default::default(), None) };
+    let Some(path) = config_path() else {
+        return (Default::default(), None);
+    };
     match std::fs::read(&path) {
         Ok(bytes) => match serde_json::from_slice(&bytes) {
             Ok(settings) => (settings, None),
-            Err(error) => (Default::default(), Some(format!("Cannot read settings: {error}"))),
+            Err(error) => (
+                Default::default(),
+                Some(format!("Cannot read settings: {error}")),
+            ),
         },
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (Default::default(), None),
-        Err(error) => (Default::default(), Some(format!("Cannot read settings: {error}"))),
+        Err(error) => (
+            Default::default(),
+            Some(format!("Cannot read settings: {error}")),
+        ),
     }
 }
 
@@ -294,30 +370,48 @@ mod tests {
 
     #[test]
     fn rename_preserves_dirty_buffer_and_restricts_live_to_markdown() {
-        let root=tempfile::tempdir().unwrap();std::fs::write(root.path().join("a.md"),b"old").unwrap();
-        let mut session=Session::default();session.open_vault(root.path()).unwrap();session.open_file(Path::new("a.md")).unwrap();
-        session.tabs[0].editor=EditorBuffer::for_path(Path::new("a.md"),b"new text");
-        session.rename_file(Path::new("a.md"),Path::new("a.txt")).unwrap();
-        assert_eq!(session.tabs[0].editor.mode(),EditorMode::Source);assert!(session.tabs[0].is_dirty());
-        assert_eq!(session.tabs[0].editor.bytes().unwrap(),b"new text");assert_eq!(session.tabs[0].loaded,b"old");
-        assert!(session.tabs[0].editor.set_mode(EditorMode::Formatted).is_err());
-        session.save(0).unwrap();assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(),b"new text");
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a.md"), b"old").unwrap();
+        let mut session = Session::default();
+        session.open_vault(root.path()).unwrap();
+        session.open_file(Path::new("a.md")).unwrap();
+        session.tabs[0].editor = EditorBuffer::for_path(Path::new("a.md"), b"new text");
+        session
+            .rename_file(Path::new("a.md"), Path::new("a.txt"))
+            .unwrap();
+        assert_eq!(session.tabs[0].editor.mode(), EditorMode::Source);
+        assert!(session.tabs[0].is_dirty());
+        assert_eq!(session.tabs[0].editor.bytes().unwrap(), b"new text");
+        assert_eq!(session.tabs[0].loaded, b"old");
+        assert!(
+            session.tabs[0]
+                .editor
+                .set_mode(EditorMode::Formatted)
+                .is_err()
+        );
+        session.save(0).unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join("a.txt")).unwrap(),
+            b"new text"
+        );
     }
 
     #[test]
     fn deletion_closes_descendants_but_failed_deletion_keeps_buffers() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join("notes")).unwrap();
-        std::fs::write(root.path().join("notes/a.md"),b"a").unwrap();
-        std::fs::write(root.path().join("keep.md"),b"keep").unwrap();
-        let mut session = Session::default(); session.open_vault(root.path()).unwrap();
+        std::fs::write(root.path().join("notes/a.md"), b"a").unwrap();
+        std::fs::write(root.path().join("keep.md"), b"keep").unwrap();
+        let mut session = Session::default();
+        session.open_vault(root.path()).unwrap();
         session.open_file(Path::new("notes/a.md")).unwrap();
         session.open_file(Path::new("keep.md")).unwrap();
-        assert!(session.delete_entry(Path::new("notes"),false).is_err());
-        assert_eq!(session.tabs.len(),2);
-        session.delete_entry(Path::new("notes"),true).unwrap();
-        assert_eq!(session.tabs.len(),1); assert_eq!(session.active,0);
-        assert_eq!(session.tabs[0].path,Path::new("keep.md"));
+        assert!(session.delete_entry(Path::new("notes"), false).is_err());
+        assert_eq!(session.tabs.len(), 2);
+        session.delete_entry(Path::new("notes"), true).unwrap();
+        assert_eq!(session.tabs.len(), 1);
+        assert_eq!(session.active, 0);
+        assert_eq!(session.tabs[0].path, Path::new("keep.md"));
     }
 
     #[test]
@@ -332,9 +426,15 @@ mod tests {
 
         assert!(session.save(0).is_err());
         assert_eq!(session.tabs[0].loaded, b"original\n");
-        assert_eq!(session.tabs[0].editor.bytes().unwrap(), b"my unsaved edit\n");
+        assert_eq!(
+            session.tabs[0].editor.bytes().unwrap(),
+            b"my unsaved edit\n"
+        );
         assert!(session.tabs[0].is_dirty());
-        assert_eq!(std::fs::read(directory.path().join("note.md")).unwrap(), b"external edit\n");
+        assert_eq!(
+            std::fs::read(directory.path().join("note.md")).unwrap(),
+            b"external edit\n"
+        );
     }
 
     #[test]
@@ -348,7 +448,10 @@ mod tests {
         assert_eq!(session.tabs[0].editor.mode(), EditorMode::Hex);
         assert!(!session.tabs[0].is_dirty());
         session.save(0).unwrap();
-        assert_eq!(std::fs::read(directory.path().join("data.bin")).unwrap(), bytes);
+        assert_eq!(
+            std::fs::read(directory.path().join("data.bin")).unwrap(),
+            bytes
+        );
     }
 
     #[test]
@@ -388,13 +491,22 @@ mod tests {
         let (directory, mut session) = session_with_file("note.md", b"old\n");
         let now = Instant::now();
         replace_text(&mut session, "# Новый текст 🦀\n", now);
-        assert_eq!(session.autosave_due(now + Duration::from_millis(599)).saved, 0);
-        assert_eq!(std::fs::read(directory.path().join("note.md")).unwrap(), b"old\n");
+        assert_eq!(
+            session.autosave_due(now + Duration::from_millis(599)).saved,
+            0
+        );
+        assert_eq!(
+            std::fs::read(directory.path().join("note.md")).unwrap(),
+            b"old\n"
+        );
         let report = session.autosave_due(now + AUTOSAVE_DELAY);
         assert_eq!(report.saved, 1);
         assert!(report.errors.is_empty());
         assert!(!session.tabs[0].is_dirty());
-        assert_eq!(std::fs::read_to_string(directory.path().join("note.md")).unwrap(), "# Новый текст 🦀\n");
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("note.md")).unwrap(),
+            "# Новый текст 🦀\n"
+        );
         assert!(session.next_autosave_in(now + AUTOSAVE_DELAY).is_none());
     }
 
@@ -405,7 +517,12 @@ mod tests {
         replace_text(&mut session, "first", now);
         replace_text(&mut session, "second", now + Duration::from_millis(400));
         assert_eq!(session.autosave_due(now + AUTOSAVE_DELAY).saved, 0);
-        assert_eq!(session.autosave_due(now + Duration::from_millis(1000)).saved, 1);
+        assert_eq!(
+            session
+                .autosave_due(now + Duration::from_millis(1000))
+                .saved,
+            1
+        );
     }
 
     #[test]
@@ -420,20 +537,40 @@ mod tests {
         assert!(session.tabs[0].is_dirty());
         assert!(session.tabs[0].autosave_error().is_some());
         assert_eq!(session.tabs[0].editor.bytes().unwrap(), b"my edit");
-        assert_eq!(std::fs::read(directory.path().join("note.md")).unwrap(), b"external");
-        assert!(session.autosave_due(now + Duration::from_secs(5)).errors.is_empty());
+        assert_eq!(
+            std::fs::read(directory.path().join("note.md")).unwrap(),
+            b"external"
+        );
+        assert!(
+            session
+                .autosave_due(now + Duration::from_secs(5))
+                .errors
+                .is_empty()
+        );
         replace_text(&mut session, "continued edit", now + Duration::from_secs(6));
         assert_eq!(session.autosave_due(now + Duration::from_secs(7)).saved, 0);
-        assert!(session.next_autosave_in(now + Duration::from_secs(7)).is_none());
+        assert!(
+            session
+                .next_autosave_in(now + Duration::from_secs(7))
+                .is_none()
+        );
     }
 
     #[test]
     fn source_and_hex_files_require_manual_save() {
-        for (name, content) in [("code.rs", &b"fn main() {}"[..]), ("binary.md", &b"\xff\x00"[..])] {
+        for (name, content) in [
+            ("code.rs", &b"fn main() {}"[..]),
+            ("binary.md", &b"\xff\x00"[..]),
+        ] {
             let (directory, mut session) = session_with_file(name, content);
             assert!(!session.tabs[0].autosaves());
             session.note_edited(0, Instant::now());
-            assert_eq!(session.autosave_due(Instant::now() + Duration::from_secs(1)).saved, 0);
+            assert_eq!(
+                session
+                    .autosave_due(Instant::now() + Duration::from_secs(1))
+                    .saved,
+                0
+            );
             assert_eq!(std::fs::read(directory.path().join(name)).unwrap(), content);
         }
         let (directory, mut session) = session_with_file("note.md", b"old");
@@ -441,16 +578,25 @@ mod tests {
         replace_text(&mut session, "source change", now);
         session.tabs[0].editor.set_mode(EditorMode::Source).unwrap();
         assert_eq!(session.autosave_due(now + AUTOSAVE_DELAY).saved, 0);
-        assert_eq!(std::fs::read(directory.path().join("note.md")).unwrap(), b"old");
+        assert_eq!(
+            std::fs::read(directory.path().join("note.md")).unwrap(),
+            b"old"
+        );
     }
 
     #[test]
     fn closing_formatted_note_flushes_before_debounce() {
         let (directory, mut session) = session_with_file("note.MD", b"old");
         replace_text(&mut session, "new", Instant::now());
-        assert_eq!(session.flush_autosave(PendingAction::CloseTab(0)).unwrap(), 1);
+        assert_eq!(
+            session.flush_autosave(PendingAction::CloseTab(0)).unwrap(),
+            1
+        );
         assert!(session.dirty_tabs(PendingAction::CloseTab(0)).is_empty());
-        assert_eq!(std::fs::read(directory.path().join("note.MD")).unwrap(), b"new");
+        assert_eq!(
+            std::fs::read(directory.path().join("note.MD")).unwrap(),
+            b"new"
+        );
     }
 
     #[test]
@@ -462,21 +608,28 @@ mod tests {
         assert_eq!(session.autosave_due(now + Duration::from_secs(5)).saved, 0);
         assert!(session.next_autosave_in(now).is_none());
         assert!(session.save(0).is_err());
-        assert_eq!(std::fs::read(directory.path().join("note.md")).unwrap(), b"old");
+        assert_eq!(
+            std::fs::read(directory.path().join("note.md")).unwrap(),
+            b"old"
+        );
         let committed = now + Duration::from_secs(6);
         session.set_composing(0, false, committed);
         assert_eq!(session.autosave_due(committed).saved, 0);
         assert_eq!(session.autosave_due(committed + AUTOSAVE_DELAY).saved, 1);
-        assert_eq!(std::fs::read(directory.path().join("note.md")).unwrap(), b"composition");
+        assert_eq!(
+            std::fs::read(directory.path().join("note.md")).unwrap(),
+            b"composition"
+        );
     }
 
     #[test]
-    fn dirty_cache_invalidates_on_real_edits_and_saves(){
-        let (_directory,mut session)=session_with_file("note.md",b"old");
+    fn dirty_cache_invalidates_on_real_edits_and_saves() {
+        let (_directory, mut session) = session_with_file("note.md", b"old");
         assert!(!session.tabs[0].is_dirty());
-        assert_eq!(session.tabs[0].editor.replace_all("old","new").unwrap(),1);
+        assert_eq!(session.tabs[0].editor.replace_all("old", "new").unwrap(), 1);
         assert!(session.tabs[0].is_dirty());
         assert!(session.tabs[0].is_dirty());
-        session.save(0).unwrap();assert!(!session.tabs[0].is_dirty());
+        session.save(0).unwrap();
+        assert!(!session.tabs[0].is_dirty());
     }
 }

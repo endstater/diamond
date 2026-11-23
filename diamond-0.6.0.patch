@@ -1,0 +1,1431 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 105921c..f2679bf 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -10,7 +10,7 @@ members = [
+ resolver = "3"
+ 
+ [workspace.package]
+-version = "0.5.0"
++version = "0.6.0"
+ edition = "2024"
+ rust-version = "1.88"
+ license = "MIT"
+@@ -28,6 +28,7 @@ resvg = { version = "=0.45.1", default-features = false }
+ notify = { version = "=8.2.0", default-features = false }
+ ashpd = { version = "=0.11.0", default-features = false, features = ["async-std"] }
+ pollster = "0.4"
++latex-rust = { version = "=2.1.1", default-features = false, features = ["std"] }
+ syntect = { version = "=5.2.0", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
+ image = { version = "=0.25.8", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+ ureq = { version = "=2.12.1", default-features = false, features = ["tls"] }
+diff --git a/README.md b/README.md
+index 32a6a6c..ae53d90 100644
+--- a/README.md
++++ b/README.md
+@@ -2,7 +2,18 @@
+ 
+ Diamond — нативное приложение для заметок Markdown и исходного кода на Arch Linux. Rust, egui и OpenGL; ваши заметки остаются обычными файлами в обычной папке. Исходный код открыт под MIT.
+ 
+-Версия **0.5.0 — исходная альфа**. Это развивающийся редактор: [матрица возможностей](docs/ACCEPTANCE.md) описывает реализованный объём, [VALIDATION.md](docs/VALIDATION.md) — выполненные и ещё не выполненные проверки.
++Версия **0.6.0 — исходная альфа**. Это развивающийся редактор: [матрица возможностей](docs/ACCEPTANCE.md) описывает реализованный объём, [VALIDATION.md](docs/VALIDATION.md) — выполненные и ещё не выполненные проверки.
++
++## Обновление 0.6
++
++- Вложенные маркированные, нумерованные и смешанные списки, задачи на разных уровнях, многострочные и вложенные цитаты с inline-оформлением.
++- Enter продолжает номер, маркер или незавершённую задачу в Live и Markdown Source. Новая задача всегда не выполнена. Enter на пустом пункте завершает список либо возвращает на родительский уровень; Shift+Enter оставляет обычный перенос.
++- Формулы `$x^2$` и `$$\frac{1}{2}$$`: нативный mathematical-LaTeX через latex-rust и встроенный STIX Two Math, без браузера, shell и сетевых шрифтов. Формулы — структурные объекты, при редактировании раскрывается исходный TeX. Это математический режим, не полная TeX-система с пакетами/TikZ.
++- Сноски `текст[^note]` и `[^note]: определение`: автоматическая нумерация по первому упоминанию, повторные ссылки используют тот же номер. Ctrl+щелчок по номеру переводит к определению. Поддерживаются обычные многоабзацные определения с inline-оформлением; сложные вложенные блоки могут оставаться исходным текстом.
++- Блоки кода имеют заголовок с языком (`text`, если язык не указан) и отдельную строку пространства перед рамкой.
++- Чекбоксы увеличены, получают курсор-палец и сохраняют область нажатия при смене фокуса. Выполненная задача — залитый круг с контрастной галочкой; переключение отменяется через Ctrl+Z.
++
++0.6 подготовлена как патч к репозиторию `endstater/diamond`, базовый commit `1a495d05518e439f7df73a3d7609ad6b6f2c98ce`. На GitHub изменения не отправлены. Сохраните свои `target`, `Cargo.lock` и настройки; новая зависимость latex-rust потребует однократного разрешения Cargo.lock/загрузки. egui/eframe и MSRV Rust 1.88 не менялись.
+ 
+ ## Что умеет
+ 
+@@ -42,7 +53,7 @@ Diamond — нативное приложение для заметок Markdown
+ Требуется Rust 1.88+ с Cargo, rustfmt и Clippy. На Arch установите зависимости обычным способом. Для системного выбора файлов нужен работающий `xdg-desktop-portal` с подходящим для вашего окружения backend; для выбора шрифтов — Fontconfig. Для китайского интерфейса установите `noto-fonts-cjk` и перезапустите Diamond: приложение подбирает CJK fallback через Fontconfig.
+ 
+ ```sh
+-cd diamond-0.5.0
++cd diamond-0.6.0
+ cargo run --release -p diamond-app -- ./examples/vault
+ ```
+ 
+@@ -55,12 +66,12 @@ cargo run --release -p diamond-app -- ./examples/vault
+ Закройте Diamond. Распакуйте архив поверх старой **папки исходников**, сохранив её `target` и `Cargo.lock`. Это не путь к вашему хранилищу заметок.
+ 
+ ```sh
+-tar -xzf /путь/diamond-0.5.0.tar.gz --strip-components=1 -C /путь/к/старым/исходникам
++tar -xzf /путь/diamond-0.6.0.tar.gz --strip-components=1 -C /путь/к/старым/исходникам
+ cd /путь/к/старым/исходникам
+ cargo build --release -p diamond-app
+ ```
+ 
+-Не выполняйте `cargo clean`. Используйте тот же toolchain, профиль и флаги сборки: Cargo переиспользует совместимые артефакты и пересоберёт изменённые crates и зависящие от них части. В 0.5 добавлены зависимости `syntect`, `image` и `ureq` для грамматик и нативных изображений. Для первой сборки обновления нужен доступ к реестру crates; `pulldown-cmark` остаётся на 0.13.6. `--locked` для первого обновления не используйте — старый lockfile должен обновиться. egui/eframe остаются на 0.33.0.
++Не выполняйте `cargo clean`. Используйте тот же toolchain, профиль и флаги сборки: Cargo переиспользует совместимые артефакты и пересоберёт изменённые crates и зависящие от них части. В 0.5 добавлены зависимости `syntect`, `image` и `ureq` для грамматик и нативных изображений; в 0.6 добавлена latex-rust 2.1.1 для формул. Для первой сборки обновления нужен доступ к реестру crates; `pulldown-cmark` остаётся на 0.13.6. `--locked` для первого обновления не используйте — старый lockfile должен обновиться. egui/eframe остаются на 0.33.0.
+ 
+ Для Arch есть [PKGBUILD и инструкция](packaging/README.md).
+ 
+@@ -88,7 +99,7 @@ cargo build --release -p diamond-app
+ 
+ ## Сохранность и ограничения
+ 
+-Нетронутый Markdown сохраняется с исходными байтами, пробелами и CRLF. Неизвестные конструкции сохраняются в исходном виде; изображения внутри смешанного текстового абзаца, embeds, сложные вложенные или многоабзацные списки и HTML пока не получают полного форматированного представления. Простые списки сохраняют оформление соседних пунктов при вводе незавершённого пункта или пустой строки. Неподдерживаемые блоки показываются обычным текстом, а не как inline-код. Блоки настоящего кода сохраняют оформление кода.
++Нетронутый Markdown сохраняется с исходными байтами, пробелами и CRLF. Неизвестные конструкции сохраняются в исходном виде; изображения внутри смешанного текстового абзаца, embeds, сложные вложенные блочные конструкции (например, таблицы/код внутри контейнеров) и HTML пока не получают полного форматированного представления. Обычные вложенные списки и цитаты представлены отдельными уровнями. Простые списки сохраняют оформление соседних пунктов при вводе незавершённого пункта или пустой строки. Неподдерживаемые блоки показываются обычным текстом, а не как inline-код. Блоки настоящего кода сохраняют оформление кода.
+ 
+ Сохранение сравнивает байты файла с загруженной версией, записывает временный файл рядом, выполняет fsync и атомарную замену. При конфликте текст остаётся в памяти, автосохранение останавливается. Между последней проверкой и заменой остаётся файловая гонка; межпроцессная блокировка и журнал восстановления ещё не реализованы. Файловые операции ограничены хранилищем; переходы через `..` и симлинки отклоняются.
+ 
+diff --git a/THIRD_PARTY_LICENSES.md b/THIRD_PARTY_LICENSES.md
+index 67d84b7..8aba1c8 100644
+--- a/THIRD_PARTY_LICENSES.md
++++ b/THIRD_PARTY_LICENSES.md
+@@ -12,3 +12,5 @@ the running application does not fetch icons or fonts from the network.
+ The project owner's supplied `diamond2.svg` is included unchanged at the root and as `assets/diamond.svg`; it is the embedded application brand, separate from Lucide. A local `diamond2.svg` beside the binary can override it at startup.
+ 
+ 0.5 uses Syntect 5.2.0 (grammar/theme data bundled by that crate), image 0.25.8 and ureq 2.12.1 through Cargo. Their upstream license notices and dependency metadata remain supplied by the corresponding crates: https://github.com/trishume/syntect, https://github.com/image-rs/image, https://github.com/algesten/ureq. No webview/browser runtime is embedded for image display.
++
++0.6 uses latex-rust 2.1.1 (MIT OR Apache-2.0) with its embedded STIX Two Math font (SIL OFL 1.1), without the optional egui backend. The selected engine MIT notice and complete STIX license are retained in assets/licenses/LATEX-RUST-MIT.txt and assets/licenses/STIX-OFL.txt and installed by the Arch package. Upstream source: https://github.com/jscarr64/latex-rust/tree/v2.1.1. Only the bundled trusted math font is used.
+diff --git a/assets/licenses/LATEX-RUST-MIT.txt b/assets/licenses/LATEX-RUST-MIT.txt
+new file mode 100644
+index 0000000..9e00b83
+--- /dev/null
++++ b/assets/licenses/LATEX-RUST-MIT.txt
+@@ -0,0 +1,21 @@
++MIT License
++
++Copyright (c) 2026 Jeffrey S Carr
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/assets/licenses/STIX-OFL.txt b/assets/licenses/STIX-OFL.txt
+new file mode 100644
+index 0000000..96aa460
+--- /dev/null
++++ b/assets/licenses/STIX-OFL.txt
+@@ -0,0 +1,108 @@
++Copyright 2001-2021 The STIX Fonts Project Authors (https://github.com/stipub/stixfonts)
++
++STIX Fonts™ is a trademark of The Institute of Electrical and
++Electronics Engineers, Inc.
++
++Portions copyright © 1998–2003 by MicroPress, Inc.
++(www.micropress-inc.com), with Reserved Font Name TM Math.
++To obtain additional mathematical fonts, please contact
++    MicroPress, Inc.,
++    68-30 Harrow Street,
++    Forest Hills, NY 11375,
++    USA
++    Phone: (718) 575-1816.  
++
++Portions copyright © 1990 by Elsevier, Inc.  
++
++Portions copyright © 2010, 2012, 2014 Adobe Systems Incorporated.
++
++This Font Software is licensed under the SIL Open Font License, Version 1.1.
++This license is copied below, and is also available with a FAQ at:
++http://scripts.sil.org/OFL
++
++-----------------------------------------------------------
++SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
++-----------------------------------------------------------
++
++PREAMBLE
++The goals of the Open Font License (OFL) are to stimulate worldwide
++development of collaborative font projects, to support the font creation
++efforts of academic and linguistic communities, and to provide a free and
++open framework in which fonts may be shared and improved in partnership
++with others.
++
++The OFL allows the licensed fonts to be used, studied, modified and
++redistributed freely as long as they are not sold by themselves. The
++fonts, including any derivative works, can be bundled, embedded, 
++redistributed and/or sold with any software provided that any reserved
++names are not used by derivative works. The fonts and derivatives,
++however, cannot be released under any other type of license. The
++requirement for fonts to remain under this license does not apply
++to any document created using the fonts or their derivatives.
++
++DEFINITIONS
++"Font Software" refers to the set of files released by the Copyright
++Holder(s) under this license and clearly marked as such. This may
++include source files, build scripts and documentation.
++
++"Reserved Font Name" refers to any names specified as such after the
++copyright statement(s).
++
++"Original Version" refers to the collection of Font Software components as
++distributed by the Copyright Holder(s).
++
++"Modified Version" refers to any derivative made by adding to, deleting,
++or substituting -- in part or in whole -- any of the components of the
++Original Version, by changing formats or by porting the Font Software to a
++new environment.
++
++"Author" refers to any designer, engineer, programmer, technical
++writer or other person who contributed to the Font Software.
++
++PERMISSION & CONDITIONS
++Permission is hereby granted, free of charge, to any person obtaining
++a copy of the Font Software, to use, study, copy, merge, embed, modify,
++redistribute, and sell modified and unmodified copies of the Font
++Software, subject to the following conditions:
++
++1) Neither the Font Software nor any of its individual components,
++in Original or Modified Versions, may be sold by itself.
++
++2) Original or Modified Versions of the Font Software may be bundled,
++redistributed and/or sold with any software, provided that each copy
++contains the above copyright notice and this license. These can be
++included either as stand-alone text files, human-readable headers or
++in the appropriate machine-readable metadata fields within text or
++binary files as long as those fields can be easily viewed by the user.
++
++3) No Modified Version of the Font Software may use the Reserved Font
++Name(s) unless explicit written permission is granted by the corresponding
++Copyright Holder. This restriction only applies to the primary font name as
++presented to the users.
++
++4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
++Software shall not be used to promote, endorse or advertise any
++Modified Version, except to acknowledge the contribution(s) of the
++Copyright Holder(s) and the Author(s) or with their explicit written
++permission.
++
++5) The Font Software, modified or unmodified, in part or in whole,
++must be distributed entirely under this license, and must not be
++distributed under any other license. The requirement for fonts to
++remain under this license does not apply to any document created
++using the Font Software.
++
++TERMINATION
++This license becomes null and void if any of the above conditions are
++not met.
++
++DISCLAIMER
++THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
++EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
++MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
++OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
++COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
++INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
++DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
++OTHER DEALINGS IN THE FONT SOFTWARE.
+diff --git a/crates/diamond-app/Cargo.toml b/crates/diamond-app/Cargo.toml
+index af5254b..bf1dde6 100644
+--- a/crates/diamond-app/Cargo.toml
++++ b/crates/diamond-app/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "diamond-app"
+-version = "0.5.0"
++version = "0.6.0"
+ edition.workspace = true
+ rust-version.workspace = true
+ license.workspace = true
+diff --git a/crates/diamond-document/README.md b/crates/diamond-document/README.md
+index 1e2d715..7e0204d 100644
+--- a/crates/diamond-document/README.md
++++ b/crates/diamond-document/README.md
+@@ -20,3 +20,7 @@ semantic caret anchors. Ambiguous parser expansions are marked `is_exact=false`;
+ the editor displays source rather than guessing destructive offsets.
+ 
+ 0.5 parses list lines independently: a blank or unfinished item cannot demote preceding formatted items. Bare HTTP(S) URLs become links outside existing links/code marks. Tables keep original bytes, including alignment delimiters and CRLF; table separators map to explicit source boundaries. Parsing never fetches image targets.
++
++0.6 adds explicit indentation, quote levels and per-line container content anchors. Simple nested/mixed lists, tasks, lazy continuation lines and multiline/nested quotes retain original prefixes and bytes. GUI-independent `line_continuation` proposes a single source transaction for ordered/bullet/task continuation, parent-level exit and quote continuation; code and display math are excluded.
++
++Math is enabled through pulldown-cmark: inline/display expressions become explicit semantic object atoms (`◇`) with owned TeX, not concealed Markdown delimiters. Footnote references use semantic reference atoms (`⁎`), labels, deterministic first-use numbering and internal links; definitions retain their label and original source. OLD_FOOTNOTES grammar is used so isolated source fragments recognize references independently of where definitions are stored. Source maps attach each atom to its complete original source span. Legacy semantic mutations that cannot retain these structures fail; live source transactions reparse and preserve history.
+diff --git a/crates/diamond-document/src/containers.rs b/crates/diamond-document/src/containers.rs
+new file mode 100644
+index 0000000..d568e98
+--- /dev/null
++++ b/crates/diamond-document/src/containers.rs
+@@ -0,0 +1,126 @@
++//! Source-preserving per-line containers and GUI-independent Enter transactions.
++use std::ops::Range;
++use crate::{Block,BlockKind,Document,ending,parse_inline};
++
++#[derive(Clone,Debug)]
++pub(crate) struct Prefix {
++    pub bytes:usize,pub indent:usize,pub quotes:usize,pub marker_start:usize,
++    pub list:Option<Marker>,pub quote_shell:String,
++}
++#[derive(Clone,Debug)]
++pub(crate) struct Marker {pub bullet:char,pub number:Option<u64>,pub task:Option<bool>,pub content_indent:usize}
++impl Marker {
++    fn next(&self)->String {
++        let marker=if let Some(number)=self.number {format!("{}{} ",number.saturating_add(1),self.bullet)}else{format!("{} ",self.bullet)};
++        if self.task.is_some(){format!("{marker}[ ] ")}else{marker}
++    }
++}
++fn whitespace(source:&str,cursor:&mut usize)->usize {
++    let mut columns=0;
++    while let Some(c)=source[*cursor..].chars().next().filter(|c|matches!(c,' '|'\t')) {
++        columns+=if c=='\t'{4-columns%4}else{1};*cursor+=c.len_utf8();
++    }
++    columns
++}
++pub(crate) fn prefix(source:&str)->Prefix {
++    let mut cursor=0;let mut indent=whitespace(source,&mut cursor);let mut quotes=0;
++    while source[cursor..].starts_with('>') {
++        quotes+=1;cursor+=1;
++        if source[cursor..].starts_with(' '){cursor+=1;}
++        indent+=whitespace(source,&mut cursor);
++    }
++    let marker_start=cursor;let rest=&source[cursor..];
++    let mut list=None;
++    if let Some(c)=rest.chars().next().filter(|c|matches!(c,'-'|'*'|'+')) {
++        if rest.len()==1||rest[1..].starts_with([' ','\t']) {
++            cursor+=1;whitespace(source,&mut cursor);list=Some(Marker{bullet:c,number:None,task:None,content_indent:indent+cursor-marker_start});
++        }
++    } else {
++        let digits=rest.bytes().take_while(u8::is_ascii_digit).count();
++        if digits>0 {
++            let delimiter=rest[digits..].chars().next();
++            if let Some(c)=delimiter.filter(|c|matches!(c,'.'|')')) {
++                let after=digits+1;
++                if rest[after..].is_empty()||rest[after..].starts_with([' ','\t']) {
++                    if let Ok(number)=rest[..digits].parse::<u64>() {
++                        cursor+=after;whitespace(source,&mut cursor);list=Some(Marker{bullet:c,number:Some(number),task:None,content_indent:indent+cursor-marker_start});
++                    }
++                }
++            }
++        }
++    }
++    if let Some(marker)=&mut list {
++        let rest=&source[cursor..];
++        if (rest.starts_with("[ ]")||rest.starts_with("[x]")||rest.starts_with("[X]"))
++            && (rest.len()==3||rest[3..].starts_with([' ','\t'])) {
++            marker.task=Some(!rest.starts_with("[ ]"));cursor+=3;whitespace(source,&mut cursor);
++        }
++    }
++    Prefix{bytes:cursor,indent,quotes,marker_start,list,quote_shell:
++        if quotes==0 {String::new()}else{"> ".repeat(quotes)}}
++}
++
++pub(crate) fn lines(source:&str,quoted:bool)->Vec<Block> {
++    let mut result:Vec<Block>=Vec::new();let mut inherited_quotes=0;
++    let mut parents:Vec<(usize,usize,usize)>=Vec::new();
++    for line in source.split_inclusive('\n') {
++        let content=line.trim_end_matches(['\r','\n']);let mut info=prefix(content);
++        if content.trim().is_empty() {
++            if let Some(last)=result.last_mut(){last.trailing.push_str(line);}else{result.push(Block::raw(line));}
++            continue;
++        }
++        if quoted && info.quotes==0 {info.quotes=inherited_quotes;}
++        inherited_quotes=info.quotes;
++        if let Some(marker)=&info.list {
++            parents.retain(|(quotes,indent,_)|*quotes==info.quotes&&*indent<info.indent);
++            parents.push((info.quotes,info.indent,marker.content_indent));
++        } else if let Some((_,parent,content))=parents.iter().rev().find(|(quotes,_,content)|*quotes==info.quotes&&info.indent>=*content) {
++            info.indent=parent+(info.indent-content);
++        }
++        let body=&content[info.bytes..];
++        let kind=if let Some(marker)=&info.list {
++            match marker.task {Some(done)=>BlockKind::Task(done),None=>if marker.number.is_some(){BlockKind::Ordered}else{BlockKind::Bullet}}
++        } else if info.quotes>0 {BlockKind::Quote}else{BlockKind::Paragraph};
++        // Complex embedded constructs stay local raw lines rather than demoting siblings.
++        let Some(inline)=parse_inline(body,&BlockKind::Paragraph) else {result.push(Block::raw(line));continue;};
++        let mut block=Block{kind,indent:info.indent,quote_depth:info.quotes,content_prefix:Some(info.bytes),
++            order:info.list.as_ref().and_then(|marker|marker.number).unwrap_or(1),
++            original:Some(line.into()),ending:ending(line).into(),..Block::empty()};
++        inline.apply(&mut block);result.push(block);
++    }
++    result
++}
++
++#[derive(Clone,Debug,PartialEq,Eq)]
++pub struct Continuation {pub range:Range<usize>,pub text:String}
++impl Document {
++    /// An atomic source transaction for Enter. Source positions count scalars.
++    pub fn line_continuation(&self,caret:usize)->Option<Continuation> {
++        let map=self.source_map();let byte=map.source.char_indices().map(|(byte,_)|byte).chain(std::iter::once(map.source.len())).nth(caret)?;
++        if map.blocks.iter().zip(self.blocks()).any(|(span,block)|matches!(block.kind,BlockKind::Code|BlockKind::Math)&&span.source_range.start<=caret&&caret<=span.source_range.end){return None;}
++        let start=map.source[..byte].rfind('\n').map_or(0,|at|at+1);
++        let end=map.source[byte..].find('\n').map_or(map.source.len(),|at|byte+at);
++        let line=map.source[start..end].trim_end_matches('\r');let info=prefix(line);
++        if byte<start+info.bytes{return None;}
++        let newline=if map.source.contains("\r\n"){ "\r\n" }else{"\n"};
++        let source_start=map.source[..start].chars().count();
++        if let Some(marker)=&info.list {
++            if line[info.bytes..].trim().is_empty() {
++                let parent=map.source[..start].lines().rev().map(prefix).take_while(|p|p.quotes==info.quotes)
++                    .find(|p|p.list.is_some()&&p.indent<info.indent);
++                let replacement=parent.map(|parent|format!("{}{}{}",parent.quote_shell," ".repeat(parent.indent),parent.list.as_ref().unwrap().next()))
++                    .unwrap_or_else(||info.quote_shell.clone());
++                return Some(Continuation{range:source_start..caret,text:replacement});
++            }
++            let shell=&line[..info.marker_start];
++            return Some(Continuation{range:caret..caret,text:format!("{newline}{shell}{}",marker.next())});
++        }
++        if info.quotes>0 {
++            if line[info.bytes..].trim().is_empty() {
++                return Some(Continuation{range:source_start..caret,text:"> ".repeat(info.quotes-1)});
++            }
++            return Some(Continuation{range:caret..caret,text:format!("{newline}{}",&line[..info.bytes])});
++        }
++        None
++    }
++}
+diff --git a/crates/diamond-document/src/lib.rs b/crates/diamond-document/src/lib.rs
+index 2c0e1f3..1d220a3 100644
+--- a/crates/diamond-document/src/lib.rs
++++ b/crates/diamond-document/src/lib.rs
+@@ -7,6 +7,8 @@ use thiserror::Error;
+ 
+ mod source_map;
+ mod structures;
++mod containers;
++pub use containers::Continuation;
+ 
+ pub use source_map::{BlockSourceMap, SourceMap};
+ pub use structures::{Table, TableCell, CellAlignment, Image};
+@@ -24,6 +26,8 @@ pub enum BlockKind {
+     Rule,
+     Table,
+     Image,
++    Math,
++    Footnote,
+     Code,
+     Raw,
+ }
+@@ -49,6 +53,18 @@ pub struct Link {
+     pub target: String,
+ }
+ 
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct MathSpan {pub range:Range<usize>,pub latex:String,pub display:bool}
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct FootnoteRef {pub range:Range<usize>,pub label:String,pub number:usize}
++
++struct Inline {
++    text:String,marks:Vec<Mark>,links:Vec<Link>,math:Vec<MathSpan>,footnotes:Vec<FootnoteRef>,
++}
++impl Inline {
++    fn apply(self,block:&mut Block){block.text=self.text;block.marks=self.marks;block.links=self.links;block.math=self.math;block.footnotes=self.footnotes;}
++}
++
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct Block {
+     pub kind: BlockKind,
+@@ -57,6 +73,13 @@ pub struct Block {
+     pub links: Vec<Link>,
+     pub table: Option<Table>,
+     pub image: Option<Image>,
++    pub math:Vec<MathSpan>,
++    pub footnotes:Vec<FootnoteRef>,
++    pub footnote_label:Option<String>,
++    pub footnote_number:Option<usize>,
++    pub indent:usize,
++    pub quote_depth:usize,
++    content_prefix:Option<usize>,
+     original: Option<String>,
+     ending: String,
+     trailing: String,
+@@ -83,6 +106,11 @@ impl Block {
+         &self.language
+     }
+ 
++    fn structural(&self)->bool {
++        self.indent>0 || self.quote_depth>1 || (self.quote_depth>0&&self.kind!=BlockKind::Quote)
++            || self.footnote_label.is_some() || !self.math.is_empty()
++    }
++
+     fn empty() -> Self {
+         Self {
+             kind: BlockKind::Paragraph,
+@@ -91,6 +119,7 @@ impl Block {
+             links: Vec::new(),
+             table: None,
+             image: None,
++            math:Vec::new(),footnotes:Vec::new(),footnote_label:None,footnote_number:None,indent:0,quote_depth:0,content_prefix:None,
+             original: None,
+             ending: String::new(),
+             trailing: String::new(),
+@@ -134,7 +163,7 @@ impl Block {
+                 format!("{fence}{}{newline}{text}{newline}{fence}", self.language)
+             }
+             BlockKind::Rule => "---".into(),
+-            BlockKind::Table | BlockKind::Image => self.text.clone(),
++            BlockKind::Table | BlockKind::Image | BlockKind::Math | BlockKind::Footnote => self.text.clone(),
+             BlockKind::Raw => self.text.clone(),
+         };
+         let mut result = body.replace("\r\n", "\n");
+@@ -202,6 +231,13 @@ impl Document {
+             });
+             leading.clear();
+         }
++        let mut numbers=std::collections::HashMap::<String,usize>::new();
++        for block in &mut blocks {for reference in &mut block.footnotes {
++            let next=numbers.len()+1;reference.number=*numbers.entry(reference.label.clone()).or_insert(next);
++        }}
++        for block in &mut blocks {if let Some(label)=&block.footnote_label {
++            let next=numbers.len()+1;block.footnote_number=Some(*numbers.entry(label.clone()).or_insert(next));
++        }}
+         Self {
+             state: State { blocks, leading, newline },
+             undo: Vec::new(),
+@@ -297,7 +333,7 @@ impl Document {
+         let (last, last_offset) = self.locate(range.end);
+         if self.state.blocks[first..=last]
+             .iter()
+-            .any(|block| matches!(block.kind, BlockKind::Raw | BlockKind::Table | BlockKind::Image) || !block.links.is_empty())
++            .any(|block| matches!(block.kind, BlockKind::Raw | BlockKind::Table | BlockKind::Image | BlockKind::Math | BlockKind::Footnote) || block.structural() || !block.links.is_empty())
+         {
+             return Err(DocumentError::RawBlock);
+         }
+@@ -386,7 +422,7 @@ impl Document {
+             let start = range.start.saturating_sub(base).min(length);
+             let end = range.end.saturating_sub(base).min(length);
+             if start < end {
+-                if matches!(block.kind, BlockKind::Raw | BlockKind::Code | BlockKind::Rule | BlockKind::Table | BlockKind::Image) || !block.links.is_empty() {
++                if matches!(block.kind, BlockKind::Raw | BlockKind::Code | BlockKind::Rule | BlockKind::Table | BlockKind::Image | BlockKind::Math | BlockKind::Footnote) || block.structural() || !block.links.is_empty() {
+                     return Err(DocumentError::RawBlock);
+                 }
+                 let chars = block.text.chars().collect::<Vec<_>>();
+@@ -455,7 +491,7 @@ impl Document {
+             return Err(DocumentError::InvalidHeading);
+         }
+         let block = self.state.blocks.get(index).ok_or(DocumentError::InvalidBlock)?;
+-        if matches!(block.kind,BlockKind::Raw|BlockKind::Table|BlockKind::Image) || matches!(kind,BlockKind::Raw|BlockKind::Table|BlockKind::Image) || !block.links.is_empty() {
++        if matches!(block.kind,BlockKind::Raw|BlockKind::Table|BlockKind::Image|BlockKind::Math|BlockKind::Footnote) || block.structural() || matches!(kind,BlockKind::Raw|BlockKind::Table|BlockKind::Image|BlockKind::Math|BlockKind::Footnote) || !block.links.is_empty() {
+             return Err(DocumentError::RawBlock);
+         }
+         if block.kind == kind {
+@@ -464,6 +500,7 @@ impl Document {
+         let before = self.state.clone();
+         let block = &mut self.state.blocks[index];
+         block.kind = kind;
++        block.quote_depth=usize::from(block.kind==BlockKind::Quote);block.content_prefix=None;
+         if block.kind == BlockKind::Code {
+             block.marks.clear();
+         }
+@@ -571,7 +608,8 @@ fn parser(source: &str) -> Parser<'_> {
+         Options::ENABLE_STRIKETHROUGH
+             | Options::ENABLE_TABLES
+             | Options::ENABLE_TASKLISTS
+-            | Options::ENABLE_FOOTNOTES
++            | Options::ENABLE_OLD_FOOTNOTES
++            | Options::ENABLE_MATH
+             | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
+             | Options::ENABLE_WIKILINKS,
+     )
+@@ -610,8 +648,10 @@ fn parse_fragment(source: &str) -> Vec<Block> {
+     let first = parser(source).next();
+     if let Some(image) = structures::parse_image(source) { return vec![image]; }
+     if matches!(first, Some(Event::Start(Tag::List(_)))) {
+-        return parse_flat_list(source).unwrap_or_else(|| vec![Block::raw(source)]);
++        return containers::lines(source,false);
+     }
++    if matches!(first,Some(Event::Start(Tag::BlockQuote(_)))) {return containers::lines(source,true);}
++    let footnote_label=if let Some(Event::Start(Tag::FootnoteDefinition(label)))=&first {Some(label.to_string())}else{None};
+     let kind = match first {
+         Some(Event::Start(Tag::Paragraph)) => BlockKind::Paragraph,
+         Some(Event::Start(Tag::Heading { level, .. })) => BlockKind::Heading(level as u8),
+@@ -619,10 +659,12 @@ fn parse_fragment(source: &str) -> Vec<Block> {
+         Some(Event::Start(Tag::CodeBlock(_))) => BlockKind::Code,
+         Some(Event::Rule) => BlockKind::Rule,
+         Some(Event::Start(Tag::Table(_))) => BlockKind::Table,
++        Some(Event::Start(Tag::FootnoteDefinition(_)))=>BlockKind::Footnote,
++        Some(Event::DisplayMath(_))=>BlockKind::Math,
+         _ => return vec![Block::raw(source)],
+     };
+     let mut block = Block {
+-        kind,
++        kind,footnote_label,
+         original: Some(source.to_owned()),
+         ending: ending(source).to_owned(),
+         ..Block::empty()
+@@ -645,10 +687,9 @@ fn parse_fragment(source: &str) -> Vec<Block> {
+         }
+     } else if block.kind == BlockKind::Rule {
+         // A structural block has no editable semantic text.
+-    } else if let Some((text, marks, links)) = parse_inline(source, &block.kind) {
+-        block.text = text;
+-        block.marks = marks;
+-        block.links = links;
++    } else if let Some(inline) = parse_inline(source, &block.kind) {
++        inline.apply(&mut block);
++        if block.math.len()==1&&block.math[0].display&&block.text=="◇" {block.kind=BlockKind::Math;}
+         if block.kind == BlockKind::Table {block.table=Some(structures::table(source, &block.text));}
+     } else {
+         return vec![Block::raw(source)];
+@@ -656,74 +697,13 @@ fn parse_fragment(source: &str) -> Vec<Block> {
+     vec![block]
+ }
+ 
+-fn parse_flat_list(source: &str) -> Option<Vec<Block>> {
+-    let mut blocks: Vec<Block> = Vec::new();
+-    for line in source.split_inclusive('\n') {
+-        if line.trim().is_empty() {
+-            if let Some(last) = blocks.last_mut() { last.trailing.push_str(line); }
+-            else { blocks.push(Block::raw(line)); }
+-            continue;
+-        }
+-        match parse_list_line(line) {
+-            Some(block) => blocks.push(block),
+-            None => blocks.push(Block::raw(line)),
+-        }
+-    }
+-    (!blocks.is_empty()).then_some(blocks)
+-}
+-
+-fn parse_list_line(line: &str) -> Option<Block> {
+-        let content = line.trim_end_matches(['\r', '\n']);
+-        let (mut kind, order, mut body) = if let Some(body) = content
+-            .strip_prefix("- ")
+-            .or_else(|| content.strip_prefix("* "))
+-            .or_else(|| content.strip_prefix("+ "))
+-            .or_else(|| matches!(content, "-" | "*" | "+").then_some(""))
+-        {
+-            (BlockKind::Bullet, 1, body)
+-        } else {
+-            let digits = content.bytes().take_while(u8::is_ascii_digit).count();
+-            if digits == 0 {
+-                return None;
+-            }
+-            let remainder = &content[digits..];
+-            let body = remainder
+-                .strip_prefix(". ")
+-                .or_else(|| remainder.strip_prefix(") "))?;
+-            (BlockKind::Ordered, content[..digits].parse().ok()?, body)
+-        };
+-        {
+-            if let Some(rest) = body.strip_prefix("[ ] ").or_else(|| (body == "[ ]").then_some("")) {
+-                kind = BlockKind::Task(false);
+-                body = rest;
+-            } else if let Some(rest) = body
+-                .strip_prefix("[x] ")
+-                .or_else(|| body.strip_prefix("[X] "))
+-                .or_else(|| matches!(body, "[x]" | "[X]").then_some(""))
+-            {
+-                kind = BlockKind::Task(true);
+-                body = rest;
+-            }
+-        }
+-        let (text, marks, links) = parse_inline(body, &BlockKind::Paragraph)?;
+-        Some(Block {
+-            kind,
+-            text,
+-            marks,
+-            links,
+-            original: Some(line.to_owned()),
+-            ending: ending(line).to_owned(),
+-            order,
+-            ..Block::empty()
+-        })
+-}
+-
+-fn parse_inline(source: &str, kind: &BlockKind) -> Option<(String, Vec<Mark>, Vec<Link>)> {
++fn parse_inline(source: &str, kind: &BlockKind) -> Option<Inline> {
+     let mut text = String::new();
+     let mut marks = Vec::new();
+     let mut stack = Vec::new();
+     let mut links = Vec::new();
+     let mut link_stack = Vec::new();
++    let mut math=Vec::new();let mut footnotes=Vec::new();
+     let mut paragraphs = 0;
+     let mut headings = 0;
+     let mut quotes = 0;
+@@ -738,8 +718,18 @@ fn parse_inline(source: &str, kind: &BlockKind) -> Option<(String, Vec<Mark>, Ve
+             Event::End(TagEnd::Table) if *kind == BlockKind::Table => {
+                 if text.ends_with('\n') {text.pop();position=position.saturating_sub(1);}
+             },
++            Event::Start(Tag::FootnoteDefinition(_)) if *kind==BlockKind::Footnote=>{},
++            Event::End(TagEnd::FootnoteDefinition) if *kind==BlockKind::Footnote=>{if text.ends_with('\n'){text.pop();position=position.saturating_sub(1);}},
+             Event::Start(Tag::Paragraph) => paragraphs += 1,
+-            Event::End(TagEnd::Paragraph) => {}
++            Event::End(TagEnd::Paragraph) => {if *kind==BlockKind::Footnote {text.push('\n');position+=1;}},
++            Event::InlineMath(value)=>{math.push(MathSpan{range:position..position+1,latex:value.to_string(),display:false});text.push('◇');position+=1;},
++            Event::DisplayMath(value)=>{math.push(MathSpan{range:position..position+1,latex:value.to_string(),display:true});text.push('◇');position+=1;},
++            Event::FootnoteReference(label)=>{
++                let label=label.to_string();
++                footnotes.push(FootnoteRef{range:position..position+1,label:label.clone(),number:0});
++                links.push(Link{range:position..position+1,target:format!("diamond-footnote:{label}")});
++                text.push('⁎');position+=1;
++            },
+             Event::Start(Tag::Heading { .. }) => headings += 1,
+             Event::End(TagEnd::Heading(_)) => {}
+             Event::Start(Tag::BlockQuote(_)) => quotes += 1,
+@@ -785,11 +775,11 @@ fn parse_inline(source: &str, kind: &BlockKind) -> Option<(String, Vec<Mark>, Ve
+         BlockKind::Paragraph => paragraphs <= 1 && headings == 0 && quotes == 0,
+         BlockKind::Heading(_) => paragraphs == 0 && headings == 1 && quotes == 0,
+         BlockKind::Quote => paragraphs <= 1 && headings == 0 && quotes == 1,
+-        BlockKind::Table => true,
++        BlockKind::Table | BlockKind::Math | BlockKind::Footnote => true,
+         _ => false,
+     };
+     structures::bare_links(&text, &marks, &mut links);
+-    valid.then_some((text, marks, links))
++    valid.then_some(Inline{text,marks,links,math,footnotes})
+ }
+ 
+ fn ending(source: &str) -> &str {
+@@ -984,6 +974,57 @@ fn trailing_newlines(text: &str) -> usize {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn nested_mixed_lists_and_tasks_keep_their_levels_and_original_bytes() {
++        let source="- root\r\n  - child\r\n    - [x] 你好\r\n  1. numbered\r\n  2. second\r\n- tail\r\n";
++        let mut document=Document::parse(source);
++        assert_eq!(document.blocks().iter().map(|block|block.indent).collect::<Vec<_>>(),vec![0,2,4,2,2,0]);
++        assert_eq!(document.blocks()[2].kind,BlockKind::Task(true));
++        assert!(document.source_map().blocks.iter().all(|block|block.is_exact));
++        assert_eq!(document.to_markdown(),source);
++        document.toggle_task(2).unwrap();assert!(document.to_markdown().contains("    - [ ] 你好"));
++        assert!(document.undo());assert_eq!(document.to_markdown(),source);
++    }
++
++    #[test]
++    fn multiline_and_nested_quotes_have_exact_content_coordinates() {
++        let source="> first\n>\n> **second** with `code`\n>> nested\n>>> deep\n";
++        let document=Document::parse(source);
++        assert_eq!(document.blocks().iter().map(|block|block.quote_depth).collect::<Vec<_>>(),vec![1,1,1,2,3]);
++        assert_eq!(document.blocks()[1].text,"");assert_eq!(document.blocks()[2].text,"second with code");
++        assert_eq!(document.blocks()[4].text,"deep");
++        assert!(document.source_map().blocks.iter().all(|block|block.is_exact));
++        assert_eq!(document.to_markdown(),source);
++    }
++
++    #[test]
++    fn enter_continues_markers_and_exits_or_outdents_empty_items() {
++        for (source,expected) in [("9. item","9. item\n10. "),("2) item","2) item\n3) "),
++            ("  - [x] item","  - [x] item\n  - [ ] "),("* item","* item\n* "),
++            ("- first\n- ","- first\n"),("- parent\n  - ","- parent\n- "),
++            ("> - item","> - item\n> - "),("> quote","> quote\n> ")] {
++            let mut document=Document::parse(source);let caret=source.chars().count();
++            let continuation=document.line_continuation(caret).unwrap();
++            document.replace_source_range(continuation.range,&continuation.text).unwrap();assert_eq!(document.to_markdown(),expected);
++            assert!(document.undo());assert_eq!(document.to_markdown(),source);
++        }
++        let code=Document::parse("```text\n- item\n```");
++        assert!(code.line_continuation(14).is_none());
++    }
++
++    #[test]
++    fn latex_and_footnotes_are_semantic_objects_with_lossless_sources() {
++        let source="Equation $x^2+\\frac{1}{2}$ and note[^word]. Again[^word].\n\n$$\n\\sqrt{x}\n$$\n\n[^word]: A **formatted** definition.\n\n    Another paragraph.\n";
++        let document=Document::parse(source);
++        assert_eq!(document.blocks()[0].math[0].latex,r"x^2+\frac{1}{2}");
++        assert_eq!(document.blocks()[0].footnotes[0].number,1);assert_eq!(document.blocks()[0].footnotes[1].number,1);
++        assert!(document.blocks().iter().any(|block|block.kind==BlockKind::Math));
++        let definition=document.blocks().iter().find(|block|block.footnote_label.as_deref()==Some("word")).unwrap();
++        assert_eq!(definition.footnote_number,Some(1));assert!(definition.text.contains("formatted"));
++        assert!(document.source_map().blocks.iter().all(|block|block.is_exact));
++        assert_eq!(document.to_markdown(),source);
++    }
++
+     #[test]
+     fn partial_and_loose_lists_do_not_demote_completed_items() {
+         for prefix in ["- ", "1. "] {
+diff --git a/crates/diamond-document/src/source_map.rs b/crates/diamond-document/src/source_map.rs
+index 2978d56..2be77bf 100644
+--- a/crates/diamond-document/src/source_map.rs
++++ b/crates/diamond-document/src/source_map.rs
+@@ -116,6 +116,8 @@ fn visible_mapping(source: &str, block: &Block) -> VisibleMapping {
+         exact: true,
+         empty_anchor: None,
+     };
++    let base=if block.content_prefix.is_some(){crate::containers::prefix(source).bytes}else{0};
++    let source=if block.content_prefix.is_some(){source[base..].trim_end_matches(['\r','\n'])}else{source};
+     let mut code_block = false;
+     if block.kind == BlockKind::Image && block.image.as_ref().is_some_and(|image| image.alt.is_empty()) {
+         return VisibleMapping{text:block.text.clone(),spans:vec![0..0;block.text.chars().count()],exact:true,empty_anchor:Some(0)};
+@@ -124,6 +126,15 @@ fn visible_mapping(source: &str, block: &Block) -> VisibleMapping {
+         match event {
+             Event::Start(Tag::CodeBlock(_)) => code_block = true,
+             Event::End(TagEnd::CodeBlock) => code_block = false,
++            Event::InlineMath(_)|Event::DisplayMath(_)=>{mapping.text.push('◇');mapping.spans.push(span);},
++            Event::FootnoteReference(_)=>{mapping.text.push('⁎');mapping.spans.push(span);},
++            Event::End(TagEnd::Paragraph) if block.kind==BlockKind::Footnote=>{
++                let anchor=mapping.spans.last().map_or(span.end,|last|last.end);
++                mapping.text.push('\n');mapping.spans.push(anchor..anchor);
++            },
++            Event::End(TagEnd::FootnoteDefinition) if block.kind==BlockKind::Footnote=>{
++                if mapping.text.ends_with('\n'){mapping.text.pop();mapping.spans.pop();}
++            },
+             Event::Text(value) => {
+                 let span = if code_block {
+                     span
+@@ -171,6 +182,8 @@ fn visible_mapping(source: &str, block: &Block) -> VisibleMapping {
+     if block.kind == BlockKind::Code && mapping.empty_anchor.is_none() {
+         mapping.empty_anchor = source.find('\n').map(|newline| newline + 1);
+     }
++    for span in &mut mapping.spans {span.start+=base;span.end+=base;}
++    mapping.empty_anchor=mapping.empty_anchor.map(|anchor|anchor+base).or(Some(base));
+     mapping
+ }
+ 
+diff --git a/crates/diamond-editor/Cargo.toml b/crates/diamond-editor/Cargo.toml
+index 8aa5f3a..292f4ff 100644
+--- a/crates/diamond-editor/Cargo.toml
++++ b/crates/diamond-editor/Cargo.toml
+@@ -6,6 +6,7 @@ rust-version.workspace = true
+ license.workspace = true
+ 
+ [dependencies]
++latex-rust.workspace = true
+ syntect.workspace = true
+ image.workspace = true
+ resvg.workspace = true
+diff --git a/crates/diamond-editor/README.md b/crates/diamond-editor/README.md
+index 7bbc497..3e3424b 100644
+--- a/crates/diamond-editor/README.md
++++ b/crates/diamond-editor/README.md
+@@ -30,3 +30,7 @@ The host allocates a full-height UI rectangle; scroll areas do not shrink to sho
+ 0.5 treats empty trailing lines as separate caret locations rather than falling back to the previous block. Window focus and TextEdit focus use the same policy, removing a continuous-repaint path when the window is unfocused. Revealed list items do not also paint a duplicate bullet/task marker; ordered decorations use the original item number.
+ 
+ GFM tables render column padding/alignment and grid geometry in the continuous semantic projection. Standalone image objects reserve native layout space and paint decoded textures with the alt label; source appears when edited. The host supplies a byte loader; local resources are requested when visible, HTTP(S) only after an explicit load click. Workers decode PNG/JPEG/GIF/WebP with byte/dimension limits and notify through request_repaint on completion. No polling timer is added. Source and fenced code share bounded cached Syntect grammar highlighting; TypeScript falls back to JavaScript.
++
++0.6 adds Enter continuation in Live and .md Source, indentation/quote geometry, numbered footnote objects with Ctrl+click navigation, and cached native mathematical-LaTeX. The math renderer pins latex-rust 2.1.1 to preserve Rust 1.88 compatibility, uses only its embedded STIX font, disables its optional egui backend, and rasterizes path-only SVG through the existing resvg. Formula objects reserve actual native glyph width/line height; source appears on editing. Unsupported math shows an error object without changing the source. Cache: 24 entries, input at most 8192 bytes / 64 brace groups, bounded raster size.
++
++Code and footnote headings occupy explicit structural projection rows. Code frames start at their header, below a native gap, so they cannot extend into preceding paragraphs. Task hit rectangles remain registered even if the native editor changes reveal state between pointer press and release; controls request focus, use a pointing-hand cursor, and paint a larger solid checked circle with a contrasting tick. No repaint timer is introduced.
+diff --git a/crates/diamond-editor/src/lib.rs b/crates/diamond-editor/src/lib.rs
+index 1ff26aa..aedcfa6 100644
+--- a/crates/diamond-editor/src/lib.rs
++++ b/crates/diamond-editor/src/lib.rs
+@@ -11,6 +11,7 @@ use thiserror::Error;
+ 
+ mod live;
+ mod syntax;
++mod math;
+ mod media;
+ pub use media::Loader as ImageLoader;
+ mod search;
+@@ -407,6 +408,22 @@ impl EditorBuffer {
+         } else { (false, false, false) };
+         let mut raw_has_focus = false;
+ 
++        if self.mode==EditorMode::Source && self.formatting_allowed && self.raw_composition.is_none() && !raw_ime.0
++            && ui.input(|input|input.focused&&input.modifiers==Modifiers::NONE&&input.key_pressed(Key::Enter))
++            && ui.memory(|memory|memory.has_focus(edit_id))
++            && let Some(mut native)=egui::text_edit::TextEditState::load(ui.ctx(),edit_id)
++            && let Some(cursor)=native.cursor.char_range()
++            && cursor.primary.index==cursor.secondary.index
++            && let Some(continuation)=Document::parse(&self.source).line_continuation(cursor.primary.index)
++            && ui.input_mut(|input|input.consume_key(Modifiers::NONE,Key::Enter)) {
++            let to_byte=|position|self.source.char_indices().map(|(byte,_)|byte).chain(std::iter::once(self.source.len())).nth(position).unwrap_or(self.source.len());
++            let bytes=to_byte(continuation.range.start)..to_byte(continuation.range.end);
++            let target=continuation.range.start+continuation.text.chars().count();
++            self.source.replace_range(bytes,&continuation.text);
++            native.cursor.set_char_range(Some(egui::text::CCursorRange{primary:egui::text::CCursor::new(target),secondary:egui::text::CCursor::new(target),h_pos:None}));
++            native.store(ui.ctx(),edit_id);response.changed=true;
++        }
++
+         match self.mode {
+             EditorMode::Formatted => {
+                 if let Some(document) = self.document.as_mut() {
+diff --git a/crates/diamond-editor/src/live.rs b/crates/diamond-editor/src/live.rs
+index c3f54f9..8fa291e 100644
+--- a/crates/diamond-editor/src/live.rs
++++ b/crates/diamond-editor/src/live.rs
+@@ -28,6 +28,7 @@ pub(super) struct LiveState {
+     composition_checkpoint: Option<Document>,
+     composition_selection: SourceSelection,
+     reset_native_state: bool,
++    pending_jump:Option<usize>,
+ }
+ 
+ impl LiveState {
+@@ -67,6 +68,14 @@ struct ProjectedBlock {
+     marks: Vec<Mark>,
+     links: Vec<diamond_document::Link>,
+     index: usize,
++    indent:usize,
++    quote_depth:usize,
++    math:Vec<diamond_document::MathSpan>,
++    footnotes:Vec<diamond_document::FootnoteRef>,
++    content_start:usize,
++    header:Option<Range<usize>>,
++    gap:Option<Range<usize>>,
++    source_range:Range<usize>,
+     text: String,
+     language: String,
+     order: u64,
+@@ -103,6 +112,16 @@ impl Projection {
+             let range = &block_map.source_range;
+             result.append_source(&chars, consumed..range.start);
+             let view_start = result.scalar_len();
++            let mut header=None;let mut gap=None;
++            if block.kind==BlockKind::Code || block.kind==BlockKind::Footnote {
++                if !result.text.ends_with("\n\n") {
++                    let start=result.scalar_len();result.append_virtual("\n",range.start);gap=Some(start..result.scalar_len());
++                }
++                let start=result.scalar_len();
++                let title=if let Some(label)=&block.footnote_label {format!("[{}] {label}",block.footnote_number.unwrap_or(0))}else{block.language().split_whitespace().next().unwrap_or("text").to_owned()};
++                result.append_virtual(&format!("{title}\n"),range.start);header=Some(start..result.scalar_len());
++            }
++            let content_start=result.scalar_len();
+             let revealed = !block_map.is_exact || block.kind == BlockKind::Raw
+                 || reveal.is_some_and(|active| ranges_touch(active, range));
+             if revealed {
+@@ -140,7 +159,9 @@ impl Projection {
+                 kind: block.kind.clone(),
+                 marks: block.marks.clone(),
+                 links: block.links.clone(),
+-                index,
++                index,indent:block.indent,quote_depth:block.quote_depth,
++                math:block.math.clone(),footnotes:block.footnotes.clone(),
++                content_start,header,gap,source_range:range.clone(),
+                 text:block.text.clone(),language:block.language().into(),order:block.order(),
+                 table:block.table.clone(),image:block.image.clone(),image_height:88.0,
+                 revealed,
+@@ -155,6 +176,10 @@ impl Projection {
+ 
+     fn scalar_len(&self) -> usize { self.to_source.len() - 1 }
+ 
++    fn append_virtual(&mut self,text:&str,source:usize){
++        for c in text.chars(){self.text.push(c);self.to_source.push(source);}
++    }
++
+     fn append_source(&mut self, source: &[char], range: Range<usize>) {
+         if range.start > range.end || range.end > source.len() { return; }
+         if let Some(last) = self.to_source.last_mut() { *last = range.start; }
+@@ -173,6 +198,7 @@ impl Projection {
+     }
+ 
+     fn view_at(&self, source: usize) -> usize {
++        if let Some(block)=self.blocks.iter().find(|block|block.header.is_some()&&block.source_range.start==source) {return block.content_start;}
+         let upper = self.to_source.partition_point(|position| *position < source);
+         if upper == 0 { return 0; }
+         if upper >= self.to_source.len() { return self.scalar_len(); }
+@@ -203,26 +229,28 @@ impl Projection {
+                     let source = self.source_at(view);
+                     let next = block.after.partition_point(|at| *at <= source);
+                     next.checked_sub(1).filter(|index| *index + 1 < block.before.len() && source < block.before[*index + 1])
+-                } else { Some(view - block.view_range.start) };
++                } else {view.checked_sub(block.content_start)};
+                 match block.kind {
+                     BlockKind::Heading(level) => format.font_id.size *= match level { 1 => 1.8, 2 => 1.5, _ => 1.2 },
+-                    BlockKind::Quote => { format.italics = true; format.color = Color32::from_gray(if options.dark{155}else{100}); }
++                    BlockKind::Quote => { format.color = Color32::from_gray(if options.dark{155}else{100}); }
+                     BlockKind::Code => {
+                         format.font_id = FontId::monospace(font_size * 0.94);
+                         format.background = Color32::from_gray(if options.dark{28}else{237});
+                     }
+-                    BlockKind::Task(true) => {
+-                        format.strikethrough = Stroke::new(1.0, Color32::from_gray(135));
+-                        format.color = Color32::from_gray(if options.dark{140}else{105});
++                    BlockKind::Task(done) => {
++                        format.line_height=Some((font_size*1.5).max(26.0));
++                        if done {format.strikethrough = Stroke::new(1.0, Color32::from_gray(135));
++                        format.color = Color32::from_gray(if options.dark{140}else{105});}
+                     }
+                     _ => {}
+                 }
+                 if !block.revealed {
++                    if view==block.content_start {leading_space+=container_indent(block,font_size);}
+                     if block.image.is_some() {format.line_height=Some(block.image_height+font_size*1.8);format.valign=egui::Align::Max;}
+                     if let Some(table)=&table_layouts[block_index] {
+                         format.line_height=Some(font_size*1.8);format.valign=egui::Align::Center;
+                         if character=='\t' {format.font_id.size=0.01;}
+-                        let position=view-block.view_range.start;
++                        let position=view.saturating_sub(block.content_start);
+                         if let Ok(index)=table.padding.binary_search_by_key(&position,|pair|pair.0) {leading_space=table.padding[index].1;}
+                         if table_headers[block_index].is_some_and(|end|position<end) {
+                             format.extra_letter_spacing=0.25;
+@@ -256,6 +284,26 @@ impl Projection {
+                     }
+                 }
+             }
++            if let Some(block)=self.blocks.get(block_index) {
++                if block.gap.as_ref().is_some_and(|range|range.contains(&view)) {
++                    format.font_id.size=1.0;format.line_height=Some(12.0);format.color=Color32::TRANSPARENT;format.background=Color32::TRANSPARENT;
++                } else if block.header.as_ref().is_some_and(|range|range.contains(&view)) {
++                    format=TextFormat::simple(FontId::new(font_size*0.76,options.family.clone()),ui.visuals().weak_text_color());
++                    format.line_height=Some(font_size*1.65);
++                } else if !block.revealed && let Some(position)=view.checked_sub(block.content_start) {
++                    if let Some(reference)=block.footnotes.iter().find(|reference|reference.range.contains(&position)) {
++                        let width=ui.fonts_mut(|fonts|fonts.layout_no_wrap(reference.number.to_string(),FontId::monospace(font_size*0.72),options.accent).size().x);
++                        format.font_id.size=1.0;format.extra_letter_spacing=width+3.0;format.line_height=Some(font_size*1.3);format.color=Color32::TRANSPARENT;
++                    }
++                    let at=block.math.partition_point(|math|math.range.end<=position);
++                    if let Some(math)=block.math.get(at).filter(|math|math.range.contains(&position)) {
++                        let formula=super::math::formula(ui.ctx(),&math.latex,math.display);let size=formula.size*(font_size/16.0);
++                        format.font_id.size=1.0;format.color=Color32::TRANSPARENT;format.extra_letter_spacing=size.x+4.0;
++                        format.line_height=Some(size.y.max(font_size*1.3)+4.0);
++                        if block.kind==BlockKind::Math {leading_space+=((width-size.x)/2.0).max(0.0);}
++                    }
++                }
++            }
+             let source=self.source_at(view);
+             let matched=options.matches.partition_point(|range|range.end<=source);
+             if options.matches.get(matched).is_some_and(|range|range.contains(&source)) {
+@@ -275,8 +323,20 @@ fn table_layout(ui:&egui::Ui,block:&ProjectedBlock,size:f32,family:&egui::FontFa
+     if block.revealed {return None;}
+     let table=block.table.as_ref()?;
+     let mut columns=vec![64.0_f32;table.columns.len()];
+-    let widths:Vec<_>=table.cells.iter().map(|cell|ui.fonts_mut(|fonts|
+-        fonts.layout_no_wrap(cell.text.clone(),FontId::new(size,family.clone()),Color32::WHITE).size().x)).collect();
++    let glyph_width=|text:&str,font_size:f32|ui.fonts_mut(|fonts|fonts.layout_no_wrap(text.to_owned(),FontId::new(font_size,family.clone()),Color32::WHITE).size().x);
++    let widths:Vec<_>=table.cells.iter().map(|cell|{
++        let mut width=glyph_width(&cell.text,size);
++        let first=block.math.partition_point(|math|math.range.end<=cell.range.start);
++        for math in block.math[first..].iter().take_while(|math|math.range.start<cell.range.end) {
++            width+=super::math::formula(ui.ctx(),&math.latex,math.display).size.x*(size/16.0)+4.0-glyph_width("◇",size);
++        }
++        let first=block.footnotes.partition_point(|reference|reference.range.end<=cell.range.start);
++        for reference in block.footnotes[first..].iter().take_while(|reference|reference.range.start<cell.range.end) {
++            let reference_width=ui.fonts_mut(|fonts|fonts.layout_no_wrap(reference.number.to_string(),FontId::monospace(size*0.72),Color32::WHITE).size().x);
++            width+=reference_width+3.0-glyph_width("⁎",size);
++        }
++        width
++    }).collect();
+     for (cell,width) in table.cells.iter().zip(&widths) {if let Some(column)=columns.get_mut(cell.column){*column=column.max(*width+24.0);}}
+     let mut starts=Vec::with_capacity(columns.len());let mut left=0.0;
+     for column in &columns {starts.push(left);left+=column;}
+@@ -419,7 +479,9 @@ fn coalesce(mut before: Document, after: &Document) -> Result<Document, String>
+ 
+ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveState, id: egui::Id, font_size: f32, options:&ViewOptions<'_>, images:&mut super::media::Images) -> LiveResponse {
+     let mut response = LiveResponse::default();
+-    if !state.composing && let Some(range)=&options.jump {
++    let jump=state.pending_jump.take().map(|source|source..source).or_else(||options.jump.clone());
++    if jump.is_some(){ui.memory_mut(|memory|memory.request_focus(id));}
++    if !state.composing && let Some(range)=&jump {
+         state.selection=SourceSelection{primary:range.end,secondary:range.start};state.reset_native_state=true;
+     }
+     let focused = ui.input(|input| input.focused) && ui.memory(|memory| memory.has_focus(id));
+@@ -450,8 +512,18 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
+             response.changed |= document.undo();
+         }
+     }
++    if focused && !state.composing && state.selection.primary==state.selection.secondary
++        && ui.input(|input|input.key_pressed(Key::Enter)&&input.modifiers==Modifiers::NONE)
++        && let Some(continuation)=document.line_continuation(state.selection.primary)
++        && ui.input_mut(|input|input.consume_key(Modifiers::NONE,Key::Enter)) {
++        let target=continuation.range.start+continuation.text.chars().count();
++        match document.replace_source_range(continuation.range,&continuation.text) {
++            Ok(())=>{state.selection=SourceSelection{primary:target,secondary:target};state.reset_native_state=true;response.changed=true;},
++            Err(error)=>response.error=Some(error.to_string()),
++        }
++    }
+     if !state.composing {
+-        state.reveal = if let Some(range)=&options.jump {caret_block(document,range.start)}
++        state.reveal = if let Some(range)=&jump {caret_block(document,range.start)}
+             else if focused {caret_block(document,state.selection.primary)}
+             else {options.active.and_then(|range|caret_block(document,range.start))};
+     }
+@@ -496,7 +568,7 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
+         let output = egui::TextEdit::multiline(&mut adapter)
+             .id(id).font(FontId::new(font_size,options.family.clone()))
+             .desired_width(ui.available_width()).desired_rows(30).min_size(egui::vec2(0.0,height)).frame(false)
+-            .margin(egui::Margin { left: 24, right: 4, top: 4, bottom: 4 })
++            .margin(egui::Margin { left: 36, right: 4, top: 4, bottom: 4 })
+             .layouter(&mut layouter).show(ui);
+         has_focus = output.response.has_focus();
+         if let Some(cursor) = output.cursor_range {
+@@ -506,7 +578,7 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
+                 secondary: map.source_at(cursor.secondary.index),
+             };
+         }
+-        if let Some(range)=&options.jump {
++        if let Some(range)=&jump {
+             let view=projection.borrow().view_at(range.start);
+             let rect=output.galley.pos_from_cursor(CCursor::new(view)).translate(output.galley_pos.to_vec2());
+             ui.scroll_to_rect(rect,Some(egui::Align::Center));
+@@ -521,7 +593,7 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
+                 let position = if block.revealed {
+                     block.after.partition_point(|at| *at <= source).checked_sub(1)
+                         .filter(|index| *index + 1 < block.before.len() && source < block.before[*index + 1])
+-                } else {Some(view - block.view_range.start)};
++                } else {view.checked_sub(block.content_start)};
+                 if let Some(link) = position.and_then(|position| block.links.iter().find(|link| link.range.contains(&position))) {
+                     output.response.clone().on_hover_text(options.language.text("Open link: Ctrl+click"));
+                     if ui.input(|input| input.modifiers.command) {
+@@ -532,6 +604,13 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
+             }
+         }
+     });
++    if let Some(label)=response.open_link.as_deref().and_then(|target|target.strip_prefix("diamond-footnote:")).map(str::to_owned) {
++        let map=adapter.document.source_map();
++        if let Some((span,_))=map.blocks.iter().zip(adapter.document.blocks()).find(|(_,block)|block.footnote_label.as_deref()==Some(label.as_str())) {
++            state.pending_jump=Some(span.source_range.start);ui.ctx().request_repaint();
++        } else {response.error=Some(format!("Undefined footnote: {label}"));}
++        response.open_link=None;
++    }
+     if let Some(selection) = adapter.forced_selection { state.selection = selection; }
+     state.reveal = adapter.reveal;
+     state.last_projection.clone_from(&adapter.text);
+@@ -548,6 +627,7 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
+         }
+     }
+     if let Some(index) = toggled.filter(|_| !state.composing && !adapter.changed) {
++        state.selection=before_selection;
+         match adapter.document.toggle_task(index) {
+             Ok(()) => { response.changed = true; state.reset_native_state = true; },
+             Err(error) => response.error = Some(error.to_string()),
+@@ -593,11 +673,22 @@ fn paint_structures(ui:&mut egui::Ui,output:&egui::text_edit::TextEditOutput,pro
+         let start=output.galley.pos_from_cursor(CCursor::new(block.view_range.start)).translate(output.galley_pos.to_vec2());
+         let end=output.galley.pos_from_cursor(CCursor::new(block.view_range.end.saturating_sub(1).max(block.view_range.start))).translate(output.galley_pos.to_vec2());
+         if block.kind==BlockKind::Code {
++            let start=output.galley.pos_from_cursor(CCursor::new(block.header.as_ref().map_or(block.content_start,|range|range.start))).translate(output.galley_pos.to_vec2());
+             let rect=egui::Rect::from_min_max(egui::pos2(output.galley_pos.x-10.0,start.top()-3.0),egui::pos2(output.response.rect.right()-4.0,end.bottom()+3.0));
+             shapes.push(egui::Shape::rect_filled(rect,10.0,Color32::from_gray(if options.dark{26}else{237})));
+             shapes.push(egui::Shape::rect_stroke(rect,10.0,Stroke::new(1.0,Color32::from_gray(if options.dark{45}else{210})),egui::StrokeKind::Inside));
+         }
+         if block.revealed {continue;}
++        for reference in &block.footnotes {
++            let caret=output.galley.pos_from_cursor(CCursor::new(block.content_start+reference.range.start)).translate(output.galley_pos.to_vec2());
++            ui.painter().text(egui::pos2(caret.left()+1.0,caret.top()),egui::Align2::LEFT_TOP,reference.number.to_string(),FontId::monospace(size*0.72),options.accent);
++        }
++        for math in &block.math {
++            let caret=output.galley.pos_from_cursor(CCursor::new(block.content_start+math.range.start)).translate(output.galley_pos.to_vec2());
++            let formula=super::math::formula(ui.ctx(),&math.latex,math.display);let dimensions=formula.size*(size/16.0);
++            let rect=egui::Rect::from_min_size(egui::pos2(caret.left()+2.0,caret.center().y-dimensions.y/2.0),dimensions);
++            super::math::paint(ui,&formula,rect,ui.visuals().text_color());
++        }
+         if let Some(image)=&block.image {
+             let rect=egui::Rect::from_min_size(egui::pos2(output.galley_pos.x,start.top()+3.0),egui::vec2((output.response.rect.right()-output.galley_pos.x-8.0).max(1.0),block.image_height));
+             images.show(ui,rect,image,options.language);
+@@ -621,30 +712,48 @@ fn paint_structures(ui:&mut egui::Ui,output:&egui::text_edit::TextEditOutput,pro
+     ui.painter().set(background,egui::Shape::Vec(shapes));
+ }
+ 
++fn container_indent(block:&ProjectedBlock,size:f32)->f32 {
++    block.indent as f32*size*0.55 + block.quote_depth as f32*14.0
++        + if block.quote_depth>0&&matches!(block.kind,BlockKind::Bullet|BlockKind::Ordered|BlockKind::Task(_)){20.0}else{0.0}
++}
++
+ fn paint_decorations(ui: &mut egui::Ui, output: &egui::text_edit::TextEditOutput, projection: &Projection, font_size: f32, language: diamond_core::Language) -> Option<usize> {
+-    let mut toggled = None;
+-    let color = Color32::from_gray(145);
++    let mut toggled=None;let color=ui.visuals().weak_text_color();
+     for block in &projection.blocks {
+-        if block.revealed { continue; }
+-        let caret = output.galley.pos_from_cursor(CCursor::new(block.view_range.start)).translate(output.galley_pos.to_vec2());
+-        let center = egui::pos2(caret.left() - 14.0, caret.center().y);
+-        match block.kind {
+-            BlockKind::Bullet => { ui.painter().circle_filled(center, 2.3, color); }
+-            BlockKind::Ordered => { ui.painter().text(center, egui::Align2::CENTER_CENTER, format!("{}.",block.order), FontId::monospace(font_size * 0.8), color); }
+-            BlockKind::Task(done) => {
+-                let hit = egui::Rect::from_center_size(center, egui::vec2(22.0, 22.0));
+-                let response = ui.interact(hit, output.response.id.with(("task", block.index)), egui::Sense::click());
+-                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Checkbox, ui.is_enabled(), language.text(if done { "Completed task" } else { "Task" })));
+-                let tint = if response.hovered() { ui.visuals().hyperlink_color } else { color };
+-                ui.painter().circle_stroke(center, 6.0, Stroke::new(1.5, tint));
+-                if done { ui.painter().circle_filled(center, 3.5, tint); }
+-                if response.clicked() { toggled = Some(block.index); }
+-            }
+-            BlockKind::Rule => {
+-                ui.painter().line_segment([egui::pos2(caret.left(), center.y), egui::pos2(output.response.rect.right() - 8.0, center.y)], Stroke::new(1.0, color));
++        if block.revealed && !matches!(block.kind,BlockKind::Task(_)){continue;}
++        let caret=output.galley.pos_from_cursor(CCursor::new(block.content_start)).translate(output.galley_pos.to_vec2());
++        let indent=container_indent(block,font_size);
++        let body_x=output.galley_pos.x+indent;
++        let center=egui::pos2(body_x-18.0,caret.center().y);
++        if !block.revealed && block.quote_depth>0 {
++            let end=output.galley.pos_from_cursor(CCursor::new(block.view_range.end.saturating_sub(1).max(block.content_start))).translate(output.galley_pos.to_vec2());
++            for level in 0..block.quote_depth {
++                let marker_space=if matches!(block.kind,BlockKind::Bullet|BlockKind::Ordered|BlockKind::Task(_)){30.0}else{10.0};
++                let x=body_x-marker_space-level as f32*14.0;
++                ui.painter().line_segment([egui::pos2(x,caret.top()),egui::pos2(x,end.bottom())],Stroke::new(2.0,color));
+             }
+-            BlockKind::Quote => { ui.painter().line_segment([egui::pos2(center.x, caret.top()), egui::pos2(center.x, caret.bottom())], Stroke::new(2.0, color)); }
+-            _ => {}
++        }
++        match block.kind {
++            BlockKind::Bullet=>{ui.painter().circle_filled(center,2.5,color);},
++            BlockKind::Ordered=>{ui.painter().text(center,egui::Align2::CENTER_CENTER,format!("{}.",block.order),FontId::monospace(font_size*0.8),color);},
++            BlockKind::Task(done)=>{
++                let hit=egui::Rect::from_center_size(center,egui::vec2(30.0,caret.height().clamp(22.0,30.0)));
++                let response=ui.interact(hit,output.response.id.with(("task",block.index)),egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
++                if response.is_pointer_button_down_on()||response.clicked(){response.request_focus();}
++                response.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Checkbox,ui.is_enabled(),language.text(if done{"Completed task"}else{"Task"})));
++                if !block.revealed || response.hovered() || response.is_pointer_button_down_on() {
++                    let tint=if done||response.hovered(){ui.visuals().hyperlink_color}else{color};
++                    if done {
++                        ui.painter().circle_filled(center,8.5,tint);
++                        let ink=if u16::from(tint.r())+u16::from(tint.g())+u16::from(tint.b())>380{Color32::from_gray(20)}else{Color32::WHITE};
++                        ui.painter().line_segment([center+egui::vec2(-4.0,0.0),center+egui::vec2(-1.0,3.0)],Stroke::new(1.8,ink));
++                        ui.painter().line_segment([center+egui::vec2(-1.0,3.0),center+egui::vec2(4.5,-3.5)],Stroke::new(1.8,ink));
++                    } else {ui.painter().circle_stroke(center,8.5,Stroke::new(1.5,tint));}
++                }
++                if response.clicked(){toggled=Some(block.index);}
++            },
++            BlockKind::Rule=>{ui.painter().line_segment([egui::pos2(caret.left(),center.y),egui::pos2(output.response.rect.right()-8.0,center.y)],Stroke::new(1.0,color));},
++            _=>{},
+         }
+     }
+     toggled
+@@ -659,6 +768,36 @@ mod tests {
+         LiveBuffer { text: projection.text.clone(), document, projection: Rc::new(RefCell::new(projection)), reveal, error: None, pending_insert: None, forced_selection: None, changed: false, checkpoint: None }
+     }
+ 
++    #[test]
++    fn code_heading_reserves_a_real_row_before_the_code_body() {
++        let source="Before\n\n```rust\nfn main() {}\n```\n";
++        let document=Document::parse(source);let projection=Projection::build(&document,None);
++        let code=projection.blocks.iter().find(|block|block.kind==BlockKind::Code).unwrap();
++        assert!(code.header.is_some());assert!(code.content_start>code.header.as_ref().unwrap().start);
++        assert!(projection.text.contains("rust\nfn main() {}"));
++        let revealed=Projection::build(&document,Some(&code.source_range));
++        assert_eq!(revealed.view_at(code.source_range.start),revealed.blocks[1].content_start);
++        assert_eq!(document.to_markdown(),source);
++    }
++
++    #[test]
++    fn task_pointer_press_release_is_not_stolen_by_the_text_editor() {
++        let context=egui::Context::default();let id=egui::Id::new("task-click-regression");
++        let mut document=Document::parse("- [ ] task\n");let mut state=LiveState::default();let mut images=super::super::media::Images::default();
++        let options=ViewOptions{language:diamond_core::Language::En,family:egui::FontFamily::Proportional,wrap:true,matches:&[],active:None,jump:None,accent:Color32::LIGHT_GRAY,dark:true};
++        let point=egui::pos2(26.0,25.0);
++        let frames=vec![vec![],vec![egui::Event::PointerMoved(point)],
++            vec![egui::Event::PointerButton{pos:point,button:egui::PointerButton::Primary,pressed:true,modifiers:Modifiers::NONE}],
++            vec![egui::Event::PointerButton{pos:point,button:egui::PointerButton::Primary,pressed:false,modifiers:Modifiers::NONE}]];
++        for (frame,events) in frames.into_iter().enumerate() {
++            let _=context.run(egui::RawInput{events,time:Some(frame as f64),screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(640.0,480.0))),..Default::default()},|ctx|{
++                egui::CentralPanel::default().show(ctx,|ui|{show(ui,&mut document,&mut state,id,17.0,&options,&mut images);});
++            });
++        }
++        assert_eq!(document.blocks()[0].kind,BlockKind::Task(true));assert!(document.undo());
++        assert_eq!(document.to_markdown(),"- [ ] task\n");
++    }
++
+     #[test]
+     fn blank_line_caret_does_not_reveal_the_preceding_markdown() {
+         for source in ["# Heading\n", "- [ ] task\n", "1. item\n\n", "**bold**\n\n"] {
+diff --git a/crates/diamond-editor/src/math.rs b/crates/diamond-editor/src/math.rs
+new file mode 100644
+index 0000000..90694a5
+--- /dev/null
++++ b/crates/diamond-editor/src/math.rs
+@@ -0,0 +1,57 @@
++//! Cached native mathematical LaTeX. Only the embedded STIX math font is read.
++use std::sync::OnceLock;
++use egui::{Color32,Context,TextureHandle,Vec2};
++use latex_rust::{MathFont,SvgOptions,Dim};
++static FONT:OnceLock<Result<MathFont,String>>=OnceLock::new();
++#[derive(Clone)]
++pub struct Formula {pub texture:Option<TextureHandle>,pub size:Vec2,pub error:Option<String>}
++#[derive(Clone)]
++struct Entry {latex:String,display:bool,formula:Formula}
++#[derive(Clone,Default)]
++struct Cache(Vec<Entry>);
++
++pub fn formula(ctx:&Context,latex:&str,display:bool)->Formula {
++    let id=egui::Id::new("diamond-math-cache");
++    if let Some(hit)=ctx.data_mut(|data|data.get_temp_mut_or_default::<Cache>(id).0.iter()
++        .find(|entry|entry.latex==latex&&entry.display==display).map(|entry|entry.formula.clone())){return hit;}
++    let result=render(ctx,latex,display).unwrap_or_else(|error|Formula{texture:None,size:egui::vec2(22.0,20.0),error:Some(error)});
++    ctx.data_mut(|data|{let cache=data.get_temp_mut_or_default::<Cache>(id);
++        if cache.0.len()>=24{cache.0.remove(0);}cache.0.push(Entry{latex:latex.into(),display,formula:result.clone()});});result
++}
++fn render(ctx:&Context,latex:&str,display:bool)->Result<Formula,String>{
++    if latex.len()>8192{return Err("Formula exceeds the 8192-byte limit".into());}
++    let mut depth=0usize;
++    for byte in latex.bytes(){if byte==b'{' {depth+=1;if depth>64{return Err("Formula nesting exceeds 64 groups".into());}}else if byte==b'}'{depth=depth.saturating_sub(1);}}
++    let font=FONT.get_or_init(||MathFont::stix_two_math().map_err(|error|error.to_string())).as_ref().map_err(Clone::clone)?;
++    let options=SvgOptions{font_size_pt:Dim::from_i64(12),color:latex_rust::Color::rgb(255,255,255),display};
++    let svg=latex_rust::latex_to_svg(latex,font,&options).map_err(|error|error.to_string())?;
++    let tree=resvg::usvg::Tree::from_data(svg.as_bytes(),&resvg::usvg::Options::default()).map_err(|error|error.to_string())?;
++    let size=egui::vec2(tree.size().width(),tree.size().height());
++    if !(size.x>0.0&&size.y>0.0)||size.x>4096.0||size.y>2048.0{return Err("Formula is too large to render".into());}
++    let scale=2.0_f32.min(2048.0/size.x).min(1024.0/size.y);
++    let width=(size.x*scale).ceil().max(1.0) as u32;let height=(size.y*scale).ceil().max(1.0) as u32;
++    let mut pixels=resvg::tiny_skia::Pixmap::new(width,height).ok_or("Cannot allocate formula image")?;
++    resvg::render(&tree,resvg::tiny_skia::Transform::from_scale(scale,scale),&mut pixels.as_mut());
++    let image=egui::ColorImage::from_rgba_premultiplied([width as usize,height as usize],pixels.data());
++    let texture=ctx.load_texture("latex-math",image,egui::TextureOptions::LINEAR);
++    Ok(Formula{texture:Some(texture),size,error:None})
++}
++pub fn paint(ui:&mut egui::Ui,formula:&Formula,rect:egui::Rect,color:Color32){
++    if let Some(texture)=&formula.texture {ui.painter().image(texture.id(),rect,egui::Rect::from_min_max(egui::Pos2::ZERO,egui::pos2(1.0,1.0)),color);}
++    else {ui.painter().text(rect.center(),egui::Align2::CENTER_CENTER,"◇",egui::FontId::proportional(18.0),color);}
++    if let Some(error)=&formula.error {
++        ui.interact(rect,ui.id().with(("math-error",rect.left().to_bits(),rect.top().to_bits(),error)),egui::Sense::hover()).on_hover_text(error);
++    }
++}
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]fn fractions_roots_and_scripts_produce_native_textures(){
++        let ctx=Context::default();
++        for latex in [r"\frac{1}{2}",r"\sqrt{x^2+y^2}",r"\sum_{n=1}^{\infty}\frac{1}{n^2}"] {
++            let result=formula(&ctx,latex,true);assert!(result.error.is_none(),"{:?}",result.error);
++            assert!(result.texture.is_some());assert!(result.size.x>0.0&&result.size.y>0.0);
++        }
++        assert!(formula(&ctx,r"\unknownCommand{x}",false).error.is_some());
++    }
++}
+diff --git a/docs/ACCEPTANCE.md b/docs/ACCEPTANCE.md
+index decbc6f..06a7067 100644
+--- a/docs/ACCEPTANCE.md
++++ b/docs/ACCEPTANCE.md
+@@ -40,3 +40,11 @@ Inline-ссылки и wikilinks имеют семантическую подп
+ Таблицы GFM имеют сетку, выравнивание и inline-оформление; редактирование раскрывает Markdown. Широкая таблица может расширить горизонтальную область редактора. Изображения отдельным блоком поддерживают PNG/JPEG/GIF (один кадр)/WebP, alt/title; локальные — из хранилища, HTTP(S) — по нажатию. Встроенные картинки среди обычного абзаца, SVG и анимация GIF пока остаются за границей. При сетевой ошибке виден placeholder с ошибкой по наведению.
+ 
+ Блоки кода имеют фон и общую с Source грамматическую подсветку Syntect. По расширению/языку доступны стандартные встроенные грамматики; TypeScript использует JS fallback, неизвестные языки — обычный текст. Найденный цикл repaint при unfocused-окне исправлен в исходнике; CPU на целевой машине ещё не измерен.
++
++## 0.6
++
++Вложенные смешанные списки/задачи и многострочные/вложенные цитаты с обычным inline-содержимым имеют уровни и точные source maps. Enter продолжает пункты в Live и Markdown Source, пустой пункт завершает/понижает уровень, Shift+Enter остаётся обычным переносом. Сложные блоки внутри контейнеров остаются за границей полной поддержки.
++
++Math: $inline$ и $$display$$, дроби, корни, степени/индексы, суммы и другие команды mathematical-LaTeX, поддерживаемые latex-rust 2.1.1; полная TeX-система и пакеты не запускаются. Сноски нумеруются по первому упоминанию, Ctrl+щелчок ведёт к определению; неопределённая ссылка сообщает об ошибке. Обычные многоабзацные определения поддерживаются.
++
++Code получает язык в отдельной строке и реальный отступ перед рамкой. Task-контролы увеличены, область нажатия сохраняется между press/release и reveal, cursor pointing hand, checked = solid circle + tick. Изменения требуют проверки на целевом desktop.
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 3934b4d..1419f40 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -116,3 +116,11 @@ Incomplete list lines are represented independently and blank lines retain exact
+ Tables hold scalar cell ranges, cell text and column alignments; table separators are structural anchors in one native TextEdit. Standalone images are semantic objects with native reserved row height and an alt label. Both retain original source and reveal actual Markdown when edited. Code/table backgrounds are placed in an earlier painter slot under semantic content; no preview is painted over editable source.
+ 
+ A host-supplied image byte loader owns safe filesystem and HTTP policies. The document parser never accesses resources. Local images load only when visible, remote targets only after a load click. Decoding is bounded, runs on at most two worker threads across editors, and wakes the UI on completion. The cache stores downsized textures, not full-resolution decoded images. There is no periodic network/filesystem request. Syntect grammars use the fancy-regex backend without libonig; highlighted runs have a bounded cache keyed by text, language and theme.
++
++## 0.6 nested containers, math and references
++
++Containers preserve indentation, quote depth and a prefix boundary for every physical line. Source maps parse only its content suffix and restore byte offsets, while untouched prefixes remain stored verbatim. Continuation returns an explicit scalar-range replacement; one source transaction owns both the marker and newline for undo.
++
++Mathematical LaTeX and footnotes are structural semantic atoms with complete source spans; their rendered glyphs occupy reserved space in the same native TextEdit, not an independent preview over editable Markdown. The math engine cannot run shell commands or fetch fonts. Numbered footnote references resolve to in-document source positions. Code-language headers/gaps also have explicit structural projection/source anchors.
++
++Task controls keep stable IDs and hit regions across reveal changes, take focus for pointer interaction, and retain the existing document-level toggle transaction. The renderer's later frames do not depend on a disappearing decoration to complete a click.
+diff --git a/docs/STATUS.md b/docs/STATUS.md
+index 4eecd73..7a78912 100644
+--- a/docs/STATUS.md
++++ b/docs/STATUS.md
+@@ -1,6 +1,6 @@
+ # Implementation status
+ 
+-Diamond 0.5.0 is a source alpha for a native Rust desktop application on Arch Linux. Sync and Publish are excluded from the product scope.
++Diamond 0.6.0 is a source alpha for a native Rust desktop application on Arch Linux. Sync and Publish are excluded from the product scope.
+ 
+ The workspace now contains six implemented crates: shared settings, a semantic
+ Markdown engine, conflict-aware vault storage and search, native editor adapters,
+@@ -20,7 +20,7 @@ Plugins stop on a worker before an orderly application exit. Proposed edits
+ are rejected if the originating vault or document bytes have changed.
+ 
+ The user confirmed that the prior 0.1 snapshot compiled successfully on their
+-system. This 0.5.0 revision has not been compiled or run in this environment.
++system. This 0.6.0 revision has not been compiled or run in this environment.
+ This snapshot is not a tested release or a claim of full Obsidian
+ or VS Code parity. See the acceptance matrix for the supported subset and
+ the remaining Markdown, Excalidraw, language-server and large-file work.
+@@ -40,3 +40,7 @@ Adds semantic inline links/wikilinks and rules, source-preserving round task tog
+ ## 0.5.0 source update
+ 
+ Fixes independent list parsing across blanks/incomplete lines, empty-line reveal and a window-focus repaint loop. Adds committed-on-release sliders, no-clobber file rename with buffer retargeting, removes the redundant path row, and implements semantic GFM tables, standalone native images and shared cached syntax grammars for source/fences. Local images load automatically when visible; HTTP(S) requires a load click. Added regression tests include a headless unfocused-frame repaint check. None of the Rust tests, native rendering, real network image loading or Hyprland CPU behavior have been run in this environment.
++
++## 0.6.0 source update
++
++Adds nested container metadata/source maps, list/quote Enter continuation, mathematical-LaTeX objects, first-use numbered footnotes and in-document navigation, explicit code headings/gaps and stable larger task controls. GitHub source files were compared read-only against endstater/diamond at 1a495d05518e439f7df73a3d7609ad6b6f2c98ce. No remote writes, commits, PRs or pushes were performed. Delivery is a local update patch. Compilation and GUI runtime remain unverified here.
+diff --git a/docs/VALIDATION.md b/docs/VALIDATION.md
+index 8a82a8b..aed4870 100644
+--- a/docs/VALIDATION.md
++++ b/docs/VALIDATION.md
+@@ -96,3 +96,17 @@ undo/redo, переходы между режимами, запрет Live дл
+ `bash scripts/check.sh` завершается кодом 127: `cargo: command not found`. Rustfmt, cargo build/test/clippy и native dependency graph не выполнены. API RawInput.focused, Galley coordinates, ShapeIdx/Painter.set и TextFormat.line_height сверены по egui 0.33.0; Syntect features и thread-safe regex cache — по 5.2.0; image limits/reader — по 0.25.8; ureq timeout API — по 2.12.1. Это сверка исходников, не замена компиляции.
+ 
+ На Arch: сохранить target/Cargo.lock, разрешить Cargo обновить lockfile для новых зависимостей, выполнить `cargo fmt --all`, `./scripts/check.sh`, release-сборку. Проверить все шаги присланной последовательности списков, Enter на EOF без следующего текста, ссылки с title/autolink/wiki в пунктах, таблицу с пустыми ячейками и выравниванием, открытый/закрытый fence с разными языками, локальное изображение и HTTP(S) загрузку/ошибку/повтор по клику, отсутствие сетевых загрузок при простом открытии заметки. Проверить размер и тему после отпускания ползунка, переименование грязной вкладки/коллизию имени/смену .md в .txt и нагрузку CPU при переходе в другое окно/рабочее пространство Hyprland. Утверждение об исправлении 70% CPU на реальной машине пока не делается.
++
++### 0.5.0 build correction — E0689
++
++The user's compiler reported E0689 at parse_inline's table-row saturating_sub call. The scalar position binding now explicitly uses usize, matching Mark/Link ranges and chars().count(). This is a source-only type annotation; package/dependency versions are unchanged for cache reuse. The user's log also launched a 0.4.0 executable after the failed build; use && before running target/release/diamond to avoid launching an old artifact on build failure. Structural checks pass; Rust compilation remains unavailable here.
++
++## 0.6.0 — 2026-11-23
++
++Базовые файлы GitHub сверены с 1a495d05518e439f7df73a3d7609ad6b6f2c98ce; логика lib.rs/live.rs 0.5 совпала, различалось форматирование. Новые тесты: уровни вложенных задач и смешанных списков, CRLF и переключение/undo задачи на глубине, многострочные и вложенные цитаты, Enter для маркеров/нумерации/задач/выхода из списка, LaTeX/sources/сноски и повторная нумерация, реальные размеры native math textures, строка заголовка/отступ кода, pointer press/release через настоящий native TextEdit. Всего в исходнике 102 Rust-теста. Они не запускались.
++
++Структурная проверка исходников, smoke-тест Python-плагина, shell syntax и Rust lexical balance выполнены. Rust toolchain отсутствует, поэтому cargo build/test/clippy и rustfmt не выполнены. Патч проверяется через git apply --check --index к локальной копии точных базовых файлов, затем результат сверяется побайтово; это не проверка компиляции.
++
++API latex-rust 2.1.1 (MathFont/STIX, SvgOptions, latex_to_svg), тэги math/footnote pulldown-cmark 0.13.6 и native egui 0.33.0 сверены по первичным исходникам. Optional egui backend математической библиотеки выключен; доступ к пользовательским шрифтам математическому парсеру не даётся.
++
++На целевой машине после применения: cargo fmt --all, cargo build --release -p diamond-app (разрешить обновление Cargo.lock), cargo test --workspace, cargo clippy --workspace --all-targets -- -D warnings. Проверить pointer hover/press/release, checked tick и Ctrl+Z, Enter и Shift+Enter в Live/Source, 2–3 уровня смешанных списков/задач и цитат, пустые пункты, $inline$ / $$display$$ в абзаце/списке/таблице и ошибочную формулу, повторную сноску/Ctrl+click, рамку кода под предыдущим текстом и язык text/Rust/Python. Desktop/Hyprland и потребление CPU после этих изменений не измерялись.
+diff --git a/examples/vault/Markdown 0.6.md b/examples/vault/Markdown 0.6.md
+new file mode 100644
+index 0000000..f96ac46
+--- /dev/null
++++ b/examples/vault/Markdown 0.6.md	
+@@ -0,0 +1,43 @@
++# Markdown 0.6
++
++- Parent item
++  - Child item
++    - [ ] Nested task
++    - [x] Completed nested task
++  1. Numbered inside bullets
++  2. Next item
++- Next parent
++
++1. First
++   1. Nested one
++   2. Nested two
++2. Second
++
++> First paragraph, **bold** and `code`.
++>
++> Second paragraph.
++>> Nested quote
++>>> Third level
++
++Formula in a line: $e^{i\pi}+1=0$.
++
++$$
++\frac{1}{2}+\sqrt{x^2+y^2}
++$$
++
++A footnote[^note] and the same footnote again[^note].
++
++Before the code block:
++```rust
++fn main() {
++    println!("hello");
++}
++```
++
++```
++No language specified
++```
++
++[^note]: A **formatted** definition.
++
++    A second paragraph with $x^2$.
+diff --git a/packaging/PKGBUILD b/packaging/PKGBUILD
+index bee67da..5b66f85 100644
+--- a/packaging/PKGBUILD
++++ b/packaging/PKGBUILD
+@@ -1,6 +1,6 @@
+-# Local source package. Place diamond-0.5.0.tar.gz beside this PKGBUILD.
++# Local source package. Place diamond-0.6.0.tar.gz beside this PKGBUILD.
+ pkgname=diamond
+-pkgver=0.5.0
++pkgver=0.6.0
+ pkgrel=1
+ pkgdesc='Native Markdown notes and source editor built with Rust and egui'
+ arch=('x86_64')
+@@ -47,5 +47,7 @@ package() {
+     fi
+     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+     install -Dm644 assets/lucide/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LUCIDE"
++    install -Dm644 assets/licenses/LATEX-RUST-MIT.txt "$pkgdir/usr/share/licenses/$pkgname/LATEX-RUST-MIT"
++    install -Dm644 assets/licenses/STIX-OFL.txt "$pkgdir/usr/share/licenses/$pkgname/STIX-OFL"
+     install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+ }
+diff --git a/packaging/README.md b/packaging/README.md
+index f6eb7b7..e2fcc42 100644
+--- a/packaging/README.md
++++ b/packaging/README.md
+@@ -1,6 +1,6 @@
+ # Пакет Arch Linux
+ 
+-`PKGBUILD` для Arch Linux x86_64 собирает локальный архив исходников `diamond-0.5.0.tar.gz` с корневой папкой `diamond-0.5.0/`. Это заготовка локального пакета, а не опубликованный пакет AUR.
++`PKGBUILD` для Arch Linux x86_64 собирает локальный архив исходников `diamond-0.6.0.tar.gz` с корневой папкой `diamond-0.6.0/`. Это заготовка локального пакета, а не опубликованный пакет AUR.
+ 
+ Положите архив рядом с `PKGBUILD`, затем выполните:
+ 

@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-pub mod search;
 pub mod i18n;
+pub mod search;
 pub use i18n::Language;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,11 +66,17 @@ impl Default for AppSettings {
 mod tests {
     use super::*;
     #[test]
-    fn previous_settings_keep_values_and_gain_new_defaults(){
-        let settings:AppSettings=serde_json::from_str(r#"{"editor_font_size":19.0,"reduced_motion":true,"show_inspector":false}"#).unwrap();
-        assert_eq!(settings.editor_font_size,19.0);assert!(settings.reduced_motion);
-        assert!(!settings.show_inspector);assert_eq!(settings.theme,ThemeMode::Dark);
-        assert!(settings.word_wrap);assert_eq!(settings.editor_width,860.0);
+    fn previous_settings_keep_values_and_gain_new_defaults() {
+        let settings: AppSettings = serde_json::from_str(
+            r#"{"editor_font_size":19.0,"reduced_motion":true,"show_inspector":false}"#,
+        )
+        .unwrap();
+        assert_eq!(settings.editor_font_size, 19.0);
+        assert!(settings.reduced_motion);
+        assert!(!settings.show_inspector);
+        assert_eq!(settings.theme, ThemeMode::Dark);
+        assert!(settings.word_wrap);
+        assert_eq!(settings.editor_width, 860.0);
         assert!(settings.recent_vaults.is_empty());
     }
 }

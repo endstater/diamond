@@ -1,6 +1,6 @@
 //! Bundled Lucide SVGs, rasterized once per icon; see assets/lucide/LICENSE.
 
-use egui::{Color32, Painter, Pos2, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2};
+use egui::{Color32, Painter, Pos2, Rect, Response, Sense, StrokeKind, Ui, Vec2};
 
 const ICON_SIZE: f32 = 18.0;
 

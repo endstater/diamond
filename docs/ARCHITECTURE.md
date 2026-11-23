@@ -116,3 +116,11 @@ Incomplete list lines are represented independently and blank lines retain exact
 Tables hold scalar cell ranges, cell text and column alignments; table separators are structural anchors in one native TextEdit. Standalone images are semantic objects with native reserved row height and an alt label. Both retain original source and reveal actual Markdown when edited. Code/table backgrounds are placed in an earlier painter slot under semantic content; no preview is painted over editable source.
 
 A host-supplied image byte loader owns safe filesystem and HTTP policies. The document parser never accesses resources. Local images load only when visible, remote targets only after a load click. Decoding is bounded, runs on at most two worker threads across editors, and wakes the UI on completion. The cache stores downsized textures, not full-resolution decoded images. There is no periodic network/filesystem request. Syntect grammars use the fancy-regex backend without libonig; highlighted runs have a bounded cache keyed by text, language and theme.
+
+## 0.6 nested containers, math and references
+
+Containers preserve indentation, quote depth and a prefix boundary for every physical line. Source maps parse only its content suffix and restore byte offsets, while untouched prefixes remain stored verbatim. Continuation returns an explicit scalar-range replacement; one source transaction owns both the marker and newline for undo.
+
+Mathematical LaTeX and footnotes are structural semantic atoms with complete source spans; their rendered glyphs occupy reserved space in the same native TextEdit, not an independent preview over editable Markdown. The math engine cannot run shell commands or fetch fonts. Numbered footnote references resolve to in-document source positions. Code-language headers/gaps also have explicit structural projection/source anchors.
+
+Task controls keep stable IDs and hit regions across reveal changes, take focus for pointer interaction, and retain the existing document-level toggle transaction. The renderer's later frames do not depend on a disappearing decoration to complete a click.

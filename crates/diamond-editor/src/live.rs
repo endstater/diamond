@@ -28,6 +28,7 @@ pub(super) struct LiveState {
     composition_checkpoint: Option<Document>,
     composition_selection: SourceSelection,
     reset_native_state: bool,
+    pending_jump:Option<usize>,
 }
 
 impl LiveState {
@@ -67,6 +68,14 @@ struct ProjectedBlock {
     marks: Vec<Mark>,
     links: Vec<diamond_document::Link>,
     index: usize,
+    indent:usize,
+    quote_depth:usize,
+    math:Vec<diamond_document::MathSpan>,
+    footnotes:Vec<diamond_document::FootnoteRef>,
+    content_start:usize,
+    header:Option<Range<usize>>,
+    gap:Option<Range<usize>>,
+    source_range:Range<usize>,
     text: String,
     language: String,
     order: u64,
@@ -103,6 +112,16 @@ impl Projection {
             let range = &block_map.source_range;
             result.append_source(&chars, consumed..range.start);
             let view_start = result.scalar_len();
+            let mut header=None;let mut gap=None;
+            if block.kind==BlockKind::Code || block.kind==BlockKind::Footnote {
+                if !result.text.ends_with("\n\n") {
+                    let start=result.scalar_len();result.append_virtual("\n",range.start);gap=Some(start..result.scalar_len());
+                }
+                let start=result.scalar_len();
+                let title=if let Some(label)=&block.footnote_label {format!("[{}] {label}",block.footnote_number.unwrap_or(0))}else{block.language().split_whitespace().next().unwrap_or("text").to_owned()};
+                result.append_virtual(&format!("{title}\n"),range.start);header=Some(start..result.scalar_len());
+            }
+            let content_start=result.scalar_len();
             let revealed = !block_map.is_exact || block.kind == BlockKind::Raw
                 || reveal.is_some_and(|active| ranges_touch(active, range));
             if revealed {
@@ -140,7 +159,9 @@ impl Projection {
                 kind: block.kind.clone(),
                 marks: block.marks.clone(),
                 links: block.links.clone(),
-                index,
+                index,indent:block.indent,quote_depth:block.quote_depth,
+                math:block.math.clone(),footnotes:block.footnotes.clone(),
+                content_start,header,gap,source_range:range.clone(),
                 text:block.text.clone(),language:block.language().into(),order:block.order(),
                 table:block.table.clone(),image:block.image.clone(),image_height:88.0,
                 revealed,
@@ -154,6 +175,10 @@ impl Projection {
     }
 
     fn scalar_len(&self) -> usize { self.to_source.len() - 1 }
+
+    fn append_virtual(&mut self,text:&str,source:usize){
+        for c in text.chars(){self.text.push(c);self.to_source.push(source);}
+    }
 
     fn append_source(&mut self, source: &[char], range: Range<usize>) {
         if range.start > range.end || range.end > source.len() { return; }
@@ -173,6 +198,7 @@ impl Projection {
     }
 
     fn view_at(&self, source: usize) -> usize {
+        if let Some(block)=self.blocks.iter().find(|block|block.header.is_some()&&block.source_range.start==source) {return block.content_start;}
         let upper = self.to_source.partition_point(|position| *position < source);
         if upper == 0 { return 0; }
         if upper >= self.to_source.len() { return self.scalar_len(); }
@@ -203,26 +229,28 @@ impl Projection {
                     let source = self.source_at(view);
                     let next = block.after.partition_point(|at| *at <= source);
                     next.checked_sub(1).filter(|index| *index + 1 < block.before.len() && source < block.before[*index + 1])
-                } else { Some(view - block.view_range.start) };
+                } else {view.checked_sub(block.content_start)};
                 match block.kind {
                     BlockKind::Heading(level) => format.font_id.size *= match level { 1 => 1.8, 2 => 1.5, _ => 1.2 },
-                    BlockKind::Quote => { format.italics = true; format.color = Color32::from_gray(if options.dark{155}else{100}); }
+                    BlockKind::Quote => { format.color = Color32::from_gray(if options.dark{155}else{100}); }
                     BlockKind::Code => {
                         format.font_id = FontId::monospace(font_size * 0.94);
                         format.background = Color32::from_gray(if options.dark{28}else{237});
                     }
-                    BlockKind::Task(true) => {
-                        format.strikethrough = Stroke::new(1.0, Color32::from_gray(135));
-                        format.color = Color32::from_gray(if options.dark{140}else{105});
+                    BlockKind::Task(done) => {
+                        format.line_height=Some((font_size*1.5).max(26.0));
+                        if done {format.strikethrough = Stroke::new(1.0, Color32::from_gray(135));
+                        format.color = Color32::from_gray(if options.dark{140}else{105});}
                     }
                     _ => {}
                 }
                 if !block.revealed {
+                    if view==block.content_start {leading_space+=container_indent(block,font_size);}
                     if block.image.is_some() {format.line_height=Some(block.image_height+font_size*1.8);format.valign=egui::Align::Max;}
                     if let Some(table)=&table_layouts[block_index] {
                         format.line_height=Some(font_size*1.8);format.valign=egui::Align::Center;
                         if character=='\t' {format.font_id.size=0.01;}
-                        let position=view-block.view_range.start;
+                        let position=view.saturating_sub(block.content_start);
                         if let Ok(index)=table.padding.binary_search_by_key(&position,|pair|pair.0) {leading_space=table.padding[index].1;}
                         if table_headers[block_index].is_some_and(|end|position<end) {
                             format.extra_letter_spacing=0.25;
@@ -256,6 +284,26 @@ impl Projection {
                     }
                 }
             }
+            if let Some(block)=self.blocks.get(block_index) {
+                if block.gap.as_ref().is_some_and(|range|range.contains(&view)) {
+                    format.font_id.size=1.0;format.line_height=Some(12.0);format.color=Color32::TRANSPARENT;format.background=Color32::TRANSPARENT;
+                } else if block.header.as_ref().is_some_and(|range|range.contains(&view)) {
+                    format=TextFormat::simple(FontId::new(font_size*0.76,options.family.clone()),ui.visuals().weak_text_color());
+                    format.line_height=Some(font_size*1.65);
+                } else if !block.revealed && let Some(position)=view.checked_sub(block.content_start) {
+                    if let Some(reference)=block.footnotes.iter().find(|reference|reference.range.contains(&position)) {
+                        let width=ui.fonts_mut(|fonts|fonts.layout_no_wrap(reference.number.to_string(),FontId::monospace(font_size*0.72),options.accent).size().x);
+                        format.font_id.size=1.0;format.extra_letter_spacing=width+3.0;format.line_height=Some(font_size*1.3);format.color=Color32::TRANSPARENT;
+                    }
+                    let at=block.math.partition_point(|math|math.range.end<=position);
+                    if let Some(math)=block.math.get(at).filter(|math|math.range.contains(&position)) {
+                        let formula=super::math::formula(ui.ctx(),&math.latex,math.display);let size=formula.size*(font_size/16.0);
+                        format.font_id.size=1.0;format.color=Color32::TRANSPARENT;format.extra_letter_spacing=size.x+4.0;
+                        format.line_height=Some(size.y.max(font_size*1.3)+4.0);
+                        if block.kind==BlockKind::Math {leading_space+=((width-size.x)/2.0).max(0.0);}
+                    }
+                }
+            }
             let source=self.source_at(view);
             let matched=options.matches.partition_point(|range|range.end<=source);
             if options.matches.get(matched).is_some_and(|range|range.contains(&source)) {
@@ -275,8 +323,20 @@ fn table_layout(ui:&egui::Ui,block:&ProjectedBlock,size:f32,family:&egui::FontFa
     if block.revealed {return None;}
     let table=block.table.as_ref()?;
     let mut columns=vec![64.0_f32;table.columns.len()];
-    let widths:Vec<_>=table.cells.iter().map(|cell|ui.fonts_mut(|fonts|
-        fonts.layout_no_wrap(cell.text.clone(),FontId::new(size,family.clone()),Color32::WHITE).size().x)).collect();
+    let glyph_width=|text:&str,font_size:f32|ui.fonts_mut(|fonts|fonts.layout_no_wrap(text.to_owned(),FontId::new(font_size,family.clone()),Color32::WHITE).size().x);
+    let widths:Vec<_>=table.cells.iter().map(|cell|{
+        let mut width=glyph_width(&cell.text,size);
+        let first=block.math.partition_point(|math|math.range.end<=cell.range.start);
+        for math in block.math[first..].iter().take_while(|math|math.range.start<cell.range.end) {
+            width+=super::math::formula(ui.ctx(),&math.latex,math.display).size.x*(size/16.0)+4.0-glyph_width("◇",size);
+        }
+        let first=block.footnotes.partition_point(|reference|reference.range.end<=cell.range.start);
+        for reference in block.footnotes[first..].iter().take_while(|reference|reference.range.start<cell.range.end) {
+            let reference_width=ui.fonts_mut(|fonts|fonts.layout_no_wrap(reference.number.to_string(),FontId::monospace(size*0.72),Color32::WHITE).size().x);
+            width+=reference_width+3.0-glyph_width("⁎",size);
+        }
+        width
+    }).collect();
     for (cell,width) in table.cells.iter().zip(&widths) {if let Some(column)=columns.get_mut(cell.column){*column=column.max(*width+24.0);}}
     let mut starts=Vec::with_capacity(columns.len());let mut left=0.0;
     for column in &columns {starts.push(left);left+=column;}
@@ -419,7 +479,9 @@ fn coalesce(mut before: Document, after: &Document) -> Result<Document, String> 
 
 pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveState, id: egui::Id, font_size: f32, options:&ViewOptions<'_>, images:&mut super::media::Images) -> LiveResponse {
     let mut response = LiveResponse::default();
-    if !state.composing && let Some(range)=&options.jump {
+    let jump=state.pending_jump.take().map(|source|source..source).or_else(||options.jump.clone());
+    if jump.is_some(){ui.memory_mut(|memory|memory.request_focus(id));}
+    if !state.composing && let Some(range)=&jump {
         state.selection=SourceSelection{primary:range.end,secondary:range.start};state.reset_native_state=true;
     }
     let focused = ui.input(|input| input.focused) && ui.memory(|memory| memory.has_focus(id));
@@ -450,8 +512,18 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
             response.changed |= document.undo();
         }
     }
+    if focused && !state.composing && state.selection.primary==state.selection.secondary
+        && ui.input(|input|input.key_pressed(Key::Enter)&&input.modifiers==Modifiers::NONE)
+        && let Some(continuation)=document.line_continuation(state.selection.primary)
+        && ui.input_mut(|input|input.consume_key(Modifiers::NONE,Key::Enter)) {
+        let target=continuation.range.start+continuation.text.chars().count();
+        match document.replace_source_range(continuation.range,&continuation.text) {
+            Ok(())=>{state.selection=SourceSelection{primary:target,secondary:target};state.reset_native_state=true;response.changed=true;},
+            Err(error)=>response.error=Some(error.to_string()),
+        }
+    }
     if !state.composing {
-        state.reveal = if let Some(range)=&options.jump {caret_block(document,range.start)}
+        state.reveal = if let Some(range)=&jump {caret_block(document,range.start)}
             else if focused {caret_block(document,state.selection.primary)}
             else {options.active.and_then(|range|caret_block(document,range.start))};
     }
@@ -496,7 +568,7 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
         let output = egui::TextEdit::multiline(&mut adapter)
             .id(id).font(FontId::new(font_size,options.family.clone()))
             .desired_width(ui.available_width()).desired_rows(30).min_size(egui::vec2(0.0,height)).frame(false)
-            .margin(egui::Margin { left: 24, right: 4, top: 4, bottom: 4 })
+            .margin(egui::Margin { left: 36, right: 4, top: 4, bottom: 4 })
             .layouter(&mut layouter).show(ui);
         has_focus = output.response.has_focus();
         if let Some(cursor) = output.cursor_range {
@@ -506,7 +578,7 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
                 secondary: map.source_at(cursor.secondary.index),
             };
         }
-        if let Some(range)=&options.jump {
+        if let Some(range)=&jump {
             let view=projection.borrow().view_at(range.start);
             let rect=output.galley.pos_from_cursor(CCursor::new(view)).translate(output.galley_pos.to_vec2());
             ui.scroll_to_rect(rect,Some(egui::Align::Center));
@@ -521,7 +593,7 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
                 let position = if block.revealed {
                     block.after.partition_point(|at| *at <= source).checked_sub(1)
                         .filter(|index| *index + 1 < block.before.len() && source < block.before[*index + 1])
-                } else {Some(view - block.view_range.start)};
+                } else {view.checked_sub(block.content_start)};
                 if let Some(link) = position.and_then(|position| block.links.iter().find(|link| link.range.contains(&position))) {
                     output.response.clone().on_hover_text(options.language.text("Open link: Ctrl+click"));
                     if ui.input(|input| input.modifiers.command) {
@@ -532,6 +604,13 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
             }
         }
     });
+    if let Some(label)=response.open_link.as_deref().and_then(|target|target.strip_prefix("diamond-footnote:")).map(str::to_owned) {
+        let map=adapter.document.source_map();
+        if let Some((span,_))=map.blocks.iter().zip(adapter.document.blocks()).find(|(_,block)|block.footnote_label.as_deref()==Some(label.as_str())) {
+            state.pending_jump=Some(span.source_range.start);ui.ctx().request_repaint();
+        } else {response.error=Some(format!("Undefined footnote: {label}"));}
+        response.open_link=None;
+    }
     if let Some(selection) = adapter.forced_selection { state.selection = selection; }
     state.reveal = adapter.reveal;
     state.last_projection.clone_from(&adapter.text);
@@ -548,6 +627,7 @@ pub(super) fn show(ui: &mut egui::Ui, document: &mut Document, state: &mut LiveS
         }
     }
     if let Some(index) = toggled.filter(|_| !state.composing && !adapter.changed) {
+        state.selection=before_selection;
         match adapter.document.toggle_task(index) {
             Ok(()) => { response.changed = true; state.reset_native_state = true; },
             Err(error) => response.error = Some(error.to_string()),
@@ -593,11 +673,22 @@ fn paint_structures(ui:&mut egui::Ui,output:&egui::text_edit::TextEditOutput,pro
         let start=output.galley.pos_from_cursor(CCursor::new(block.view_range.start)).translate(output.galley_pos.to_vec2());
         let end=output.galley.pos_from_cursor(CCursor::new(block.view_range.end.saturating_sub(1).max(block.view_range.start))).translate(output.galley_pos.to_vec2());
         if block.kind==BlockKind::Code {
+            let start=output.galley.pos_from_cursor(CCursor::new(block.header.as_ref().map_or(block.content_start,|range|range.start))).translate(output.galley_pos.to_vec2());
             let rect=egui::Rect::from_min_max(egui::pos2(output.galley_pos.x-10.0,start.top()-3.0),egui::pos2(output.response.rect.right()-4.0,end.bottom()+3.0));
             shapes.push(egui::Shape::rect_filled(rect,10.0,Color32::from_gray(if options.dark{26}else{237})));
             shapes.push(egui::Shape::rect_stroke(rect,10.0,Stroke::new(1.0,Color32::from_gray(if options.dark{45}else{210})),egui::StrokeKind::Inside));
         }
         if block.revealed {continue;}
+        for reference in &block.footnotes {
+            let caret=output.galley.pos_from_cursor(CCursor::new(block.content_start+reference.range.start)).translate(output.galley_pos.to_vec2());
+            ui.painter().text(egui::pos2(caret.left()+1.0,caret.top()),egui::Align2::LEFT_TOP,reference.number.to_string(),FontId::monospace(size*0.72),options.accent);
+        }
+        for math in &block.math {
+            let caret=output.galley.pos_from_cursor(CCursor::new(block.content_start+math.range.start)).translate(output.galley_pos.to_vec2());
+            let formula=super::math::formula(ui.ctx(),&math.latex,math.display);let dimensions=formula.size*(size/16.0);
+            let rect=egui::Rect::from_min_size(egui::pos2(caret.left()+2.0,caret.center().y-dimensions.y/2.0),dimensions);
+            super::math::paint(ui,&formula,rect,ui.visuals().text_color());
+        }
         if let Some(image)=&block.image {
             let rect=egui::Rect::from_min_size(egui::pos2(output.galley_pos.x,start.top()+3.0),egui::vec2((output.response.rect.right()-output.galley_pos.x-8.0).max(1.0),block.image_height));
             images.show(ui,rect,image,options.language);
@@ -621,30 +712,48 @@ fn paint_structures(ui:&mut egui::Ui,output:&egui::text_edit::TextEditOutput,pro
     ui.painter().set(background,egui::Shape::Vec(shapes));
 }
 
+fn container_indent(block:&ProjectedBlock,size:f32)->f32 {
+    block.indent as f32*size*0.55 + block.quote_depth as f32*14.0
+        + if block.quote_depth>0&&matches!(block.kind,BlockKind::Bullet|BlockKind::Ordered|BlockKind::Task(_)){20.0}else{0.0}
+}
+
 fn paint_decorations(ui: &mut egui::Ui, output: &egui::text_edit::TextEditOutput, projection: &Projection, font_size: f32, language: diamond_core::Language) -> Option<usize> {
-    let mut toggled = None;
-    let color = Color32::from_gray(145);
+    let mut toggled=None;let color=ui.visuals().weak_text_color();
     for block in &projection.blocks {
-        if block.revealed { continue; }
-        let caret = output.galley.pos_from_cursor(CCursor::new(block.view_range.start)).translate(output.galley_pos.to_vec2());
-        let center = egui::pos2(caret.left() - 14.0, caret.center().y);
+        if block.revealed && !matches!(block.kind,BlockKind::Task(_)){continue;}
+        let caret=output.galley.pos_from_cursor(CCursor::new(block.content_start)).translate(output.galley_pos.to_vec2());
+        let indent=container_indent(block,font_size);
+        let body_x=output.galley_pos.x+indent;
+        let center=egui::pos2(body_x-18.0,caret.center().y);
+        if !block.revealed && block.quote_depth>0 {
+            let end=output.galley.pos_from_cursor(CCursor::new(block.view_range.end.saturating_sub(1).max(block.content_start))).translate(output.galley_pos.to_vec2());
+            for level in 0..block.quote_depth {
+                let marker_space=if matches!(block.kind,BlockKind::Bullet|BlockKind::Ordered|BlockKind::Task(_)){30.0}else{10.0};
+                let x=body_x-marker_space-level as f32*14.0;
+                ui.painter().line_segment([egui::pos2(x,caret.top()),egui::pos2(x,end.bottom())],Stroke::new(2.0,color));
+            }
+        }
         match block.kind {
-            BlockKind::Bullet => { ui.painter().circle_filled(center, 2.3, color); }
-            BlockKind::Ordered => { ui.painter().text(center, egui::Align2::CENTER_CENTER, format!("{}.",block.order), FontId::monospace(font_size * 0.8), color); }
-            BlockKind::Task(done) => {
-                let hit = egui::Rect::from_center_size(center, egui::vec2(22.0, 22.0));
-                let response = ui.interact(hit, output.response.id.with(("task", block.index)), egui::Sense::click());
-                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Checkbox, ui.is_enabled(), language.text(if done { "Completed task" } else { "Task" })));
-                let tint = if response.hovered() { ui.visuals().hyperlink_color } else { color };
-                ui.painter().circle_stroke(center, 6.0, Stroke::new(1.5, tint));
-                if done { ui.painter().circle_filled(center, 3.5, tint); }
-                if response.clicked() { toggled = Some(block.index); }
-            }
-            BlockKind::Rule => {
-                ui.painter().line_segment([egui::pos2(caret.left(), center.y), egui::pos2(output.response.rect.right() - 8.0, center.y)], Stroke::new(1.0, color));
-            }
-            BlockKind::Quote => { ui.painter().line_segment([egui::pos2(center.x, caret.top()), egui::pos2(center.x, caret.bottom())], Stroke::new(2.0, color)); }
-            _ => {}
+            BlockKind::Bullet=>{ui.painter().circle_filled(center,2.5,color);},
+            BlockKind::Ordered=>{ui.painter().text(center,egui::Align2::CENTER_CENTER,format!("{}.",block.order),FontId::monospace(font_size*0.8),color);},
+            BlockKind::Task(done)=>{
+                let hit=egui::Rect::from_center_size(center,egui::vec2(30.0,caret.height().clamp(22.0,30.0)));
+                let response=ui.interact(hit,output.response.id.with(("task",block.index)),egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                if response.is_pointer_button_down_on()||response.clicked(){response.request_focus();}
+                response.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Checkbox,ui.is_enabled(),language.text(if done{"Completed task"}else{"Task"})));
+                if !block.revealed || response.hovered() || response.is_pointer_button_down_on() {
+                    let tint=if done||response.hovered(){ui.visuals().hyperlink_color}else{color};
+                    if done {
+                        ui.painter().circle_filled(center,8.5,tint);
+                        let ink=if u16::from(tint.r())+u16::from(tint.g())+u16::from(tint.b())>380{Color32::from_gray(20)}else{Color32::WHITE};
+                        ui.painter().line_segment([center+egui::vec2(-4.0,0.0),center+egui::vec2(-1.0,3.0)],Stroke::new(1.8,ink));
+                        ui.painter().line_segment([center+egui::vec2(-1.0,3.0),center+egui::vec2(4.5,-3.5)],Stroke::new(1.8,ink));
+                    } else {ui.painter().circle_stroke(center,8.5,Stroke::new(1.5,tint));}
+                }
+                if response.clicked(){toggled=Some(block.index);}
+            },
+            BlockKind::Rule=>{ui.painter().line_segment([egui::pos2(caret.left(),center.y),egui::pos2(output.response.rect.right()-8.0,center.y)],Stroke::new(1.0,color));},
+            _=>{},
         }
     }
     toggled
@@ -657,6 +766,36 @@ mod tests {
     fn buffer(document: &mut Document, reveal: Option<Range<usize>>) -> LiveBuffer<'_> {
         let projection = Projection::build(document, reveal.as_ref());
         LiveBuffer { text: projection.text.clone(), document, projection: Rc::new(RefCell::new(projection)), reveal, error: None, pending_insert: None, forced_selection: None, changed: false, checkpoint: None }
+    }
+
+    #[test]
+    fn code_heading_reserves_a_real_row_before_the_code_body() {
+        let source="Before\n\n```rust\nfn main() {}\n```\n";
+        let document=Document::parse(source);let projection=Projection::build(&document,None);
+        let code=projection.blocks.iter().find(|block|block.kind==BlockKind::Code).unwrap();
+        assert!(code.header.is_some());assert!(code.content_start>code.header.as_ref().unwrap().start);
+        assert!(projection.text.contains("rust\nfn main() {}"));
+        let revealed=Projection::build(&document,Some(&code.source_range));
+        assert_eq!(revealed.view_at(code.source_range.start),revealed.blocks[1].content_start);
+        assert_eq!(document.to_markdown(),source);
+    }
+
+    #[test]
+    fn task_pointer_press_release_is_not_stolen_by_the_text_editor() {
+        let context=egui::Context::default();let id=egui::Id::new("task-click-regression");
+        let mut document=Document::parse("- [ ] task\n");let mut state=LiveState::default();let mut images=super::super::media::Images::default();
+        let options=ViewOptions{language:diamond_core::Language::En,family:egui::FontFamily::Proportional,wrap:true,matches:&[],active:None,jump:None,accent:Color32::LIGHT_GRAY,dark:true};
+        let point=egui::pos2(26.0,25.0);
+        let frames=vec![vec![],vec![egui::Event::PointerMoved(point)],
+            vec![egui::Event::PointerButton{pos:point,button:egui::PointerButton::Primary,pressed:true,modifiers:Modifiers::NONE}],
+            vec![egui::Event::PointerButton{pos:point,button:egui::PointerButton::Primary,pressed:false,modifiers:Modifiers::NONE}]];
+        for (frame,events) in frames.into_iter().enumerate() {
+            let _=context.run(egui::RawInput{events,time:Some(frame as f64),screen_rect:Some(egui::Rect::from_min_size(egui::Pos2::ZERO,egui::vec2(640.0,480.0))),..Default::default()},|ctx|{
+                egui::CentralPanel::default().show(ctx,|ui|{show(ui,&mut document,&mut state,id,17.0,&options,&mut images);});
+            });
+        }
+        assert_eq!(document.blocks()[0].kind,BlockKind::Task(true));assert!(document.undo());
+        assert_eq!(document.to_markdown(),"- [ ] task\n");
     }
 
     #[test]

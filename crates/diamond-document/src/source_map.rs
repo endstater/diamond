@@ -116,6 +116,8 @@ fn visible_mapping(source: &str, block: &Block) -> VisibleMapping {
         exact: true,
         empty_anchor: None,
     };
+    let base=if block.content_prefix.is_some(){crate::containers::prefix(source).bytes}else{0};
+    let source=if block.content_prefix.is_some(){source[base..].trim_end_matches(['\r','\n'])}else{source};
     let mut code_block = false;
     if block.kind == BlockKind::Image && block.image.as_ref().is_some_and(|image| image.alt.is_empty()) {
         return VisibleMapping{text:block.text.clone(),spans:vec![0..0;block.text.chars().count()],exact:true,empty_anchor:Some(0)};
@@ -124,6 +126,15 @@ fn visible_mapping(source: &str, block: &Block) -> VisibleMapping {
         match event {
             Event::Start(Tag::CodeBlock(_)) => code_block = true,
             Event::End(TagEnd::CodeBlock) => code_block = false,
+            Event::InlineMath(_)|Event::DisplayMath(_)=>{mapping.text.push('◇');mapping.spans.push(span);},
+            Event::FootnoteReference(_)=>{mapping.text.push('⁎');mapping.spans.push(span);},
+            Event::End(TagEnd::Paragraph) if block.kind==BlockKind::Footnote=>{
+                let anchor=mapping.spans.last().map_or(span.end,|last|last.end);
+                mapping.text.push('\n');mapping.spans.push(anchor..anchor);
+            },
+            Event::End(TagEnd::FootnoteDefinition) if block.kind==BlockKind::Footnote=>{
+                if mapping.text.ends_with('\n'){mapping.text.pop();mapping.spans.pop();}
+            },
             Event::Text(value) => {
                 let span = if code_block {
                     span
@@ -171,6 +182,8 @@ fn visible_mapping(source: &str, block: &Block) -> VisibleMapping {
     if block.kind == BlockKind::Code && mapping.empty_anchor.is_none() {
         mapping.empty_anchor = source.find('\n').map(|newline| newline + 1);
     }
+    for span in &mut mapping.spans {span.start+=base;span.end+=base;}
+    mapping.empty_anchor=mapping.empty_anchor.map(|anchor|anchor+base).or(Some(base));
     mapping
 }
 

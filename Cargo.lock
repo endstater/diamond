@@ -610,7 +610,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "diamond-app"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "ashpd",
  "diamond-core",
@@ -630,7 +630,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "regex",
  "serde",
@@ -639,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-document"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "pulldown-cmark",
  "thiserror 2.0.21",
@@ -647,12 +647,13 @@ dependencies = [
 
 [[package]]
 name = "diamond-editor"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "diamond-core",
  "diamond-document",
  "egui",
  "image",
+ "latex-rust",
  "resvg",
  "syntect",
  "thiserror 2.0.21",
@@ -670,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-vault"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "tempfile",
  "thiserror 2.0.21",
@@ -1618,6 +1619,15 @@ dependencies = [
  "arrayvec",
  "euclid",
  "smallvec",
+]
+
+[[package]]
+name = "latex-rust"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8094b939c8af51f9c7d08256ffa607b743e24d466d9a0ccc602dc748c911e54"
+dependencies = [
+ "ttf-parser",
 ]
 
 [[package]]

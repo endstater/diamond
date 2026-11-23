@@ -124,24 +124,35 @@ impl Vault {
     /// Rename a regular file without replacing any destination. A same-directory
     /// hard link + unlink is a no-clobber rename on the supported local filesystems.
     pub fn rename_file(&self, relative: &Path, name: &Path) -> Result<PathBuf> {
-        if name.components().count() != 1 || !matches!(name.components().next(), Some(Component::Normal(_))) {
+        if name.components().count() != 1
+            || !matches!(name.components().next(), Some(Component::Normal(_)))
+        {
             return Err(VaultError::InvalidPath(name.into()));
         }
         let source = self.existing_path(relative)?;
-        if !source.is_file() { return Err(VaultError::NotFile(relative.into())); }
+        if !source.is_file() {
+            return Err(VaultError::NotFile(relative.into()));
+        }
         let target_relative = relative.parent().unwrap_or(Path::new("")).join(name);
-        if target_relative == relative { return Ok(target_relative); }
+        if target_relative == relative {
+            return Ok(target_relative);
+        }
         let target = self.new_path(&target_relative)?;
         fs::hard_link(&source, &target).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {VaultError::AlreadyExists(target_relative.clone())}
-            else {io_error(&target, e)}
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                VaultError::AlreadyExists(target_relative.clone())
+            } else {
+                io_error(&target, e)
+            }
         })?;
         if let Err(error) = fs::remove_file(&source) {
             let _ = fs::remove_file(&target);
             return Err(io_error(&source, error));
         }
         // Once committed, report the new name even if a directory sync fails.
-        if let Some(parent) = target.parent() { let _ = sync_directory(parent); }
+        if let Some(parent) = target.parent() {
+            let _ = sync_directory(parent);
+        }
         Ok(target_relative)
     }
 
@@ -151,10 +162,14 @@ impl Vault {
         let path = self.existing_path(relative)?;
         let metadata = fs::symlink_metadata(&path).map_err(|e| io_error(&path, e))?;
         if directory {
-            if !metadata.is_dir() { return Err(VaultError::NotDirectory(relative.into())); }
+            if !metadata.is_dir() {
+                return Err(VaultError::NotDirectory(relative.into()));
+            }
             fs::remove_dir_all(&path).map_err(|e| io_error(&path, e))
         } else {
-            if !metadata.is_file() { return Err(VaultError::NotFile(relative.into())); }
+            if !metadata.is_file() {
+                return Err(VaultError::NotFile(relative.into()));
+            }
             fs::remove_file(&path).map_err(|e| io_error(&path, e))
         }
     }
@@ -209,9 +224,7 @@ impl Vault {
             .as_file()
             .set_permissions(permissions)
             .map_err(|e| io_error(&path, e))?;
-        temporary
-            .write_all(bytes)
-            .map_err(|e| io_error(&path, e))?;
+        temporary.write_all(bytes).map_err(|e| io_error(&path, e))?;
         temporary
             .as_file()
             .sync_all()
@@ -235,9 +248,7 @@ impl Vault {
             .ok_or_else(|| VaultError::InvalidPath(relative.to_path_buf()))?;
         let mut temporary = NamedTempFile::with_prefix_in(".diamond-save-", parent)
             .map_err(|e| io_error(parent, e))?;
-        temporary
-            .write_all(bytes)
-            .map_err(|e| io_error(&path, e))?;
+        temporary.write_all(bytes).map_err(|e| io_error(&path, e))?;
         temporary
             .as_file()
             .sync_all()
@@ -387,13 +398,29 @@ mod tests {
 
     #[test]
     fn renaming_never_clobbers_files_or_escapes_the_vault() {
-        let root=tempfile::tempdir().unwrap();let vault=Vault::open(root.path()).unwrap();
-        fs::write(root.path().join("a.md"),b"original").unwrap();fs::write(root.path().join("b.md"),b"keep").unwrap();
-        assert!(vault.rename_file(Path::new("a.md"),Path::new("b.md")).is_err());
-        assert!(vault.rename_file(Path::new("a.md"),Path::new("../oops.md")).is_err());
-        assert_eq!(vault.read(Path::new("b.md")).unwrap(),b"keep");
-        assert_eq!(vault.rename_file(Path::new("a.md"),Path::new("new.md")).unwrap(),Path::new("new.md"));
-        assert!(!root.path().join("a.md").exists());assert_eq!(vault.read(Path::new("new.md")).unwrap(),b"original");
+        let root = tempfile::tempdir().unwrap();
+        let vault = Vault::open(root.path()).unwrap();
+        fs::write(root.path().join("a.md"), b"original").unwrap();
+        fs::write(root.path().join("b.md"), b"keep").unwrap();
+        assert!(
+            vault
+                .rename_file(Path::new("a.md"), Path::new("b.md"))
+                .is_err()
+        );
+        assert!(
+            vault
+                .rename_file(Path::new("a.md"), Path::new("../oops.md"))
+                .is_err()
+        );
+        assert_eq!(vault.read(Path::new("b.md")).unwrap(), b"keep");
+        assert_eq!(
+            vault
+                .rename_file(Path::new("a.md"), Path::new("new.md"))
+                .unwrap(),
+            Path::new("new.md")
+        );
+        assert!(!root.path().join("a.md").exists());
+        assert_eq!(vault.read(Path::new("new.md")).unwrap(), b"original");
     }
 
     #[cfg(unix)]
@@ -403,11 +430,11 @@ mod tests {
         let outside = tempfile::tempdir().unwrap();
         fs::write(outside.path().join("keep.md"), b"keep").unwrap();
         fs::create_dir(root.path().join("notes")).unwrap();
-        std::os::unix::fs::symlink(outside.path(),root.path().join("notes/link")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("notes/link")).unwrap();
         let vault = Vault::open(root.path()).unwrap();
-        assert!(vault.remove(Path::new("notes/link"),true).is_err());
-        vault.remove(Path::new("notes"),true).unwrap();
-        assert_eq!(fs::read(outside.path().join("keep.md")).unwrap(),b"keep");
+        assert!(vault.remove(Path::new("notes/link"), true).is_err());
+        vault.remove(Path::new("notes"), true).unwrap();
+        assert_eq!(fs::read(outside.path().join("keep.md")).unwrap(), b"keep");
     }
 
     #[test]
@@ -507,7 +534,10 @@ mod tests {
         ));
         assert!(vault.entries().unwrap().is_empty());
         assert!(vault.build_index().unwrap().notes.is_empty());
-        assert_eq!(fs::read(outside.path().join("secret.md")).unwrap(), b"outside");
+        assert_eq!(
+            fs::read(outside.path().join("secret.md")).unwrap(),
+            b"outside"
+        );
     }
 
     #[test]
@@ -516,8 +546,12 @@ mod tests {
         let vault = Vault::open(directory.path()).unwrap();
         vault.create_dir(Path::new(".git")).unwrap();
         vault.create_dir(Path::new(".diamond")).unwrap();
-        vault.create(Path::new(".git/private.md"), b"secret").unwrap();
-        vault.create(Path::new(".diamond/cache.md"), b"cache").unwrap();
+        vault
+            .create(Path::new(".git/private.md"), b"secret")
+            .unwrap();
+        vault
+            .create(Path::new(".diamond/cache.md"), b"cache")
+            .unwrap();
         vault.create(Path::new("good.md"), b"# Good").unwrap();
         vault.create(Path::new("binary.md"), &[0xff, 0xfe]).unwrap();
         let index = vault.build_index().unwrap();
@@ -538,7 +572,10 @@ mod tests {
         let vault = Vault::open(directory.path()).unwrap();
         assert!(matches!(
             vault.read(Path::new("huge.md")),
-            Err(VaultError::TooLarge { limit: MAX_FILE_BYTES, .. })
+            Err(VaultError::TooLarge {
+                limit: MAX_FILE_BYTES,
+                ..
+            })
         ));
         let index = vault.build_index().unwrap();
         assert!(index.notes.is_empty());
@@ -551,7 +588,11 @@ mod tests {
         let vault = Vault::open(directory.path()).unwrap();
         vault.create(Path::new("note.md"), b"original").unwrap();
         fs::remove_file(directory.path().join("note.md")).unwrap();
-        assert!(vault.save(Path::new("note.md"), b"original", b"mine").is_err());
+        assert!(
+            vault
+                .save(Path::new("note.md"), b"original", b"mine")
+                .is_err()
+        );
         assert!(!directory.path().join("note.md").exists());
     }
 
@@ -567,7 +608,9 @@ mod tests {
             fs::Permissions::from_mode(0o640),
         )
         .unwrap();
-        vault.save(Path::new("note.md"), b"before", b"after").unwrap();
+        vault
+            .save(Path::new("note.md"), b"before", b"after")
+            .unwrap();
         let permissions = fs::metadata(directory.path().join("note.md"))
             .unwrap()
             .permissions();

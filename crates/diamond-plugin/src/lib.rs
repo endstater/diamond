@@ -11,9 +11,9 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use thiserror::Error;
@@ -89,23 +89,33 @@ impl PluginManifest {
 
     pub fn validate(&self) -> Result<(), PluginError> {
         if !valid_id(&self.id) {
-            return Err(PluginError::Manifest("id must contain 1–96 ASCII letters, digits, '.', '_' or '-'".into()));
+            return Err(PluginError::Manifest(
+                "id must contain 1–96 ASCII letters, digits, '.', '_' or '-'".into(),
+            ));
         }
         if !valid_title(&self.name) {
-            return Err(PluginError::Manifest("name must contain 1–128 non-control characters".into()));
+            return Err(PluginError::Manifest(
+                "name must contain 1–128 non-control characters".into(),
+            ));
         }
         if self.protocol_version != PROTOCOL_VERSION {
             return Err(PluginError::Manifest(format!(
-                "unsupported protocol version {}", self.protocol_version
+                "unsupported protocol version {}",
+                self.protocol_version
             )));
         }
         if self.program.is_empty() || self.program.len() > 4096 || self.program.contains('\0') {
             return Err(PluginError::Manifest("invalid executable name".into()));
         }
         if self.args.len() > 64
-            || self.args.iter().any(|arg| arg.len() > 4096 || arg.contains('\0'))
+            || self
+                .args
+                .iter()
+                .any(|arg| arg.len() > 4096 || arg.contains('\0'))
         {
-            return Err(PluginError::Manifest("invalid or excessive arguments".into()));
+            return Err(PluginError::Manifest(
+                "invalid or excessive arguments".into(),
+            ));
         }
         let mut seen = HashSet::new();
         if self.capabilities.iter().any(|cap| !seen.insert(*cap)) {
@@ -124,9 +134,7 @@ fn valid_id(value: &str) -> bool {
 }
 
 fn valid_title(value: &str) -> bool {
-    !value.trim().is_empty()
-        && value.chars().count() <= 128
-        && !value.chars().any(char::is_control)
+    !value.trim().is_empty() && value.chars().count() <= 128 && !value.chars().any(char::is_control)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,7 +188,10 @@ impl PluginHost {
         Self::start_with_timeout(manifest, REQUEST_TIMEOUT)
     }
 
-    fn start_with_timeout(manifest: PluginManifest, timeout: Duration) -> Result<Self, PluginError> {
+    fn start_with_timeout(
+        manifest: PluginManifest,
+        timeout: Duration,
+    ) -> Result<Self, PluginError> {
         manifest.validate()?;
         let mut command = Command::new(&manifest.program);
         command
@@ -245,7 +256,9 @@ impl PluginHost {
             json!({"protocol_version":PROTOCOL_VERSION,"capabilities":host.manifest.capabilities}),
         )?)?;
         if initialized.protocol_version != PROTOCOL_VERSION {
-            return Err(PluginError::Protocol("plugin selected an unsupported version".into()));
+            return Err(PluginError::Protocol(
+                "plugin selected an unsupported version".into(),
+            ));
         }
         let commands: Commands = serde_json::from_value(host.request("commands/list", json!({}))?)?;
         let mut seen = HashSet::new();
@@ -254,7 +267,9 @@ impl PluginHost {
                 !valid_id(&item.id) || !valid_title(&item.title) || !seen.insert(item.id.clone())
             })
         {
-            return Err(PluginError::Protocol("invalid, duplicate or excessive commands".into()));
+            return Err(PluginError::Protocol(
+                "invalid, duplicate or excessive commands".into(),
+            ));
         }
         host.commands = commands.commands;
         Ok(host)
@@ -286,7 +301,10 @@ impl PluginHost {
             return Err(PluginError::UnknownCommand(command.into()));
         }
         let mut params = json!({"command": command});
-        if self.manifest.capabilities.contains(&Capability::SelectionRead)
+        if self
+            .manifest
+            .capabilities
+            .contains(&Capability::SelectionRead)
             && let Some(selection) = selection
         {
             if selection.len() > MAX_SELECTION_BYTES {
@@ -294,19 +312,24 @@ impl PluginHost {
             }
             params["selection"] = Value::String(selection.into());
         }
-        let output = self
-            .request("commands/invoke", params)
-            .and_then(|value| serde_json::from_value::<PluginOutput>(value).map_err(PluginError::from));
+        let output = self.request("commands/invoke", params).and_then(|value| {
+            serde_json::from_value::<PluginOutput>(value).map_err(PluginError::from)
+        });
         match output {
             Ok(output)
                 if output.replacement.is_none()
-                    || self.manifest.capabilities.contains(&Capability::SelectionReplace) =>
+                    || self
+                        .manifest
+                        .capabilities
+                        .contains(&Capability::SelectionReplace) =>
             {
                 Ok(output)
             }
             Ok(_) => {
                 let _ = self.stop();
-                Err(PluginError::Protocol("plugin returned a replacement without permission".into()))
+                Err(PluginError::Protocol(
+                    "plugin returned a replacement without permission".into(),
+                ))
             }
             Err(error) => {
                 let _ = self.stop();
@@ -326,10 +349,14 @@ impl PluginHost {
     fn request_inner(&mut self, method: &str, params: Value) -> Result<Value, PluginError> {
         let input = self.input.as_ref().ok_or(PluginError::NotRunning)?;
         if self.overflowed.load(Ordering::Acquire) {
-            return Err(PluginError::Protocol("plugin emitted excessive output".into()));
+            return Err(PluginError::Protocol(
+                "plugin emitted excessive output".into(),
+            ));
         }
         let id = self.next_id;
-        self.next_id = self.next_id.checked_add(1)
+        self.next_id = self
+            .next_id
+            .checked_add(1)
             .ok_or_else(|| PluginError::Protocol("request id exhausted".into()))?;
         let mut bytes = serde_json::to_vec(&json!({
             "jsonrpc":"2.0", "id":id, "method":method, "params":params
@@ -342,27 +369,41 @@ impl PluginHost {
             TrySendError::Full(_) => PluginError::Protocol("plugin is not reading input".into()),
             TrySendError::Disconnected(_) => PluginError::NotRunning,
         })?;
-        let response = self.replies.recv_timeout(self.timeout).map_err(|error| match error {
-            mpsc::RecvTimeoutError::Timeout => PluginError::Timeout,
-            mpsc::RecvTimeoutError::Disconnected => PluginError::NotRunning,
-        })?.map_err(PluginError::Protocol)?;
+        let response = self
+            .replies
+            .recv_timeout(self.timeout)
+            .map_err(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => PluginError::Timeout,
+                mpsc::RecvTimeoutError::Disconnected => PluginError::NotRunning,
+            })?
+            .map_err(PluginError::Protocol)?;
         if self.overflowed.load(Ordering::Acquire) {
-            return Err(PluginError::Protocol("plugin emitted excessive output".into()));
+            return Err(PluginError::Protocol(
+                "plugin emitted excessive output".into(),
+            ));
         }
-        let object = response.as_object()
+        let object = response
+            .as_object()
             .ok_or_else(|| PluginError::Protocol("response must be an object".into()))?;
         if object.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
             || object.get("id").and_then(Value::as_u64) != Some(id)
         {
-            return Err(PluginError::Protocol("unexpected response version or id".into()));
+            return Err(PluginError::Protocol(
+                "unexpected response version or id".into(),
+            ));
         }
         match (object.get("result"), object.get("error")) {
             (Some(result), None) => Ok(result.clone()),
             (None, Some(error)) => {
-                let message = error.get("message").and_then(Value::as_str).unwrap_or("plugin error");
+                let message = error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("plugin error");
                 Err(PluginError::Protocol(message.chars().take(1024).collect()))
             }
-            _ => Err(PluginError::Protocol("response must contain exactly one result or error".into())),
+            _ => Err(PluginError::Protocol(
+                "response must contain exactly one result or error".into(),
+            )),
         }
     }
 
@@ -481,14 +522,21 @@ for line in sys.stdin:
         item.program = "this-program-does-not-exist-diamond-test".into();
         fs::write(&path, serde_json::to_vec(&item).unwrap()).unwrap();
         let loaded = PluginManifest::load(&path).unwrap();
-        assert_eq!(loaded.manifest_dir, Some(directory.path().canonicalize().unwrap()));
+        assert_eq!(
+            loaded.manifest_dir,
+            Some(directory.path().canonicalize().unwrap())
+        );
         assert!(PluginHost::start(loaded).is_err());
     }
 
     #[test]
     fn bounds_lines_even_without_a_newline() {
         let bytes = vec![b'x'; MAX_MESSAGE_BYTES + 1];
-        assert!(read_line(&mut Cursor::new(bytes)).unwrap_err().contains("exceeds"));
+        assert!(
+            read_line(&mut Cursor::new(bytes))
+                .unwrap_err()
+                .contains("exceeds")
+        );
         assert!(read_line(&mut Cursor::new(b"{}")).is_err());
         assert_eq!(read_line(&mut Cursor::new(b"{}\n")).unwrap(), b"{}\n");
     }
@@ -497,8 +545,17 @@ for line in sys.stdin:
     fn external_plugin_transforms_unicode_and_unknown_commands_are_local_errors() {
         let mut host = PluginHost::start(python_manifest(PYTHON_PREFIX)).unwrap();
         assert_eq!(host.commands()[0].id, "upper");
-        assert!(matches!(host.invoke("absent", None), Err(PluginError::UnknownCommand(_))));
-        assert_eq!(host.invoke("upper", Some("Привет 🦀")).unwrap().replacement.as_deref(), Some("ПРИВЕТ 🦀"));
+        assert!(matches!(
+            host.invoke("absent", None),
+            Err(PluginError::UnknownCommand(_))
+        ));
+        assert_eq!(
+            host.invoke("upper", Some("Привет 🦀"))
+                .unwrap()
+                .replacement
+                .as_deref(),
+            Some("ПРИВЕТ 🦀")
+        );
         host.stop().unwrap();
         assert!(!host.is_running());
         host.stop().unwrap();
@@ -509,7 +566,13 @@ for line in sys.stdin:
         let mut item = python_manifest(PYTHON_PREFIX);
         item.capabilities = vec![Capability::SelectionReplace];
         let mut host = PluginHost::start(item).unwrap();
-        assert_eq!(host.invoke("upper", Some("secret")).unwrap().replacement.as_deref(), Some(""));
+        assert_eq!(
+            host.invoke("upper", Some("secret"))
+                .unwrap()
+                .replacement
+                .as_deref(),
+            Some("")
+        );
     }
 
     #[test]
@@ -534,8 +597,13 @@ for line in sys.stdin:
 
     #[test]
     fn unexpected_response_id_aborts_startup() {
-        let item = python_manifest("import json,sys; q=json.loads(sys.stdin.readline()); print(json.dumps({'jsonrpc':'2.0','id':999,'result':{'protocol_version':1}}),flush=True)");
-        assert!(matches!(PluginHost::start(item), Err(PluginError::Protocol(_))));
+        let item = python_manifest(
+            "import json,sys; q=json.loads(sys.stdin.readline()); print(json.dumps({'jsonrpc':'2.0','id':999,'result':{'protocol_version':1}}),flush=True)",
+        );
+        assert!(matches!(
+            PluginHost::start(item),
+            Err(PluginError::Protocol(_))
+        ));
     }
 
     #[test]
@@ -546,13 +614,15 @@ for result in [{'protocol_version':1},{'commands':[{'id':'upper','title':'Upperc
     print(json.dumps({'jsonrpc':'2.0','id':q['id'],'result':result}),flush=True)
 time.sleep(10)
 "#;
-        let mut host = PluginHost::start_with_timeout(
-            python_manifest(body),
-            Duration::from_millis(150),
-        ).unwrap();
+        let mut host =
+            PluginHost::start_with_timeout(python_manifest(body), Duration::from_millis(150))
+                .unwrap();
         let selection = "a".repeat(MAX_SELECTION_BYTES);
         let started = Instant::now();
-        assert!(matches!(host.invoke("upper", Some(&selection)), Err(PluginError::Timeout)));
+        assert!(matches!(
+            host.invoke("upper", Some(&selection)),
+            Err(PluginError::Timeout)
+        ));
         assert!(started.elapsed() < Duration::from_secs(2));
         assert!(!host.is_running());
     }

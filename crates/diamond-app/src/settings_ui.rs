@@ -1,13 +1,24 @@
-use diamond_core::{AppSettings,ThemeMode};
 use crate::theme::SystemFont;
+use diamond_core::{AppSettings, ThemeMode};
 
-pub struct Changes {pub changed:bool,pub font_changed:bool,pub reset:bool}
+pub struct Changes {
+    pub changed: bool,
+    pub font_changed: bool,
+    pub reset: bool,
+}
 
-pub fn show(ui:&mut egui::Ui,settings:&mut AppSettings,fonts:&[SystemFont])->Changes {
+pub fn show(ui: &mut egui::Ui, settings: &mut AppSettings, fonts: &[SystemFont]) -> Changes {
     let lang = settings.language;
     let tr = |key| lang.text(key);
-    let before=(settings.editor_font.clone(),settings.editor_font_path.clone(),settings.ui_font.clone(),settings.ui_font_path.clone(),settings.language);
-    let mut changed=false;let mut reset=false;
+    let before = (
+        settings.editor_font.clone(),
+        settings.editor_font_path.clone(),
+        settings.ui_font.clone(),
+        settings.ui_font_path.clone(),
+        settings.language,
+    );
+    let mut changed = false;
+    let mut reset = false;
     egui::ScrollArea::vertical().auto_shrink([false,false]).show(ui,|ui|{
         ui.set_max_width(780.0);
         ui.heading(tr("Настройки"));
@@ -92,12 +103,31 @@ pub fn show(ui:&mut egui::Ui,settings:&mut AppSettings,fonts:&[SystemFont])->Cha
             ui.label(include_str!("../../../assets/lucide/LICENSE"));
         });
     });
-    Changes{changed,font_changed:before!=(settings.editor_font.clone(),settings.editor_font_path.clone(),settings.ui_font.clone(),settings.ui_font_path.clone(),settings.language),reset}
+    Changes {
+        changed,
+        font_changed: before
+            != (
+                settings.editor_font.clone(),
+                settings.editor_font_path.clone(),
+                settings.ui_font.clone(),
+                settings.ui_font_path.clone(),
+                settings.language,
+            ),
+        reset,
+    }
 }
 
-fn committed_slider(ui: &mut egui::Ui, key: &'static str, value: &mut f32, range: std::ops::RangeInclusive<f32>) -> bool {
+fn committed_slider(
+    ui: &mut egui::Ui,
+    key: &'static str,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+) -> bool {
     let id = ui.make_persistent_id(("settings-slider", key));
-    let mut draft = ui.ctx().data_mut(|data| data.get_temp::<f32>(id)).unwrap_or(*value);
+    let mut draft = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<f32>(id))
+        .unwrap_or(*value);
     let response = ui.add(egui::Slider::new(&mut draft, range).suffix(" px"));
     if response.dragged() || response.is_pointer_button_down_on() {
         ui.ctx().data_mut(|data| data.insert_temp(id, draft));
@@ -105,7 +135,11 @@ fn committed_slider(ui: &mut egui::Ui, key: &'static str, value: &mut f32, range
     } else {
         ui.ctx().data_mut(|data| data.remove::<f32>(id));
         if response.drag_stopped() || response.changed() || draft != *value {
-            let changed = *value != draft; *value = draft; changed
-        } else { false }
+            let changed = *value != draft;
+            *value = draft;
+            changed
+        } else {
+            false
+        }
     }
 }

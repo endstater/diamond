@@ -70,9 +70,10 @@ impl VaultIndex {
         self.notes
             .iter()
             .filter(|note| {
-                note.links
-                    .iter()
-                    .any(|link| self.resolve_link(&note.path, link).is_some_and(|p| p == target))
+                note.links.iter().any(|link| {
+                    self.resolve_link(&note.path, link)
+                        .is_some_and(|p| p == target)
+                })
             })
             .collect()
     }
@@ -96,10 +97,11 @@ impl VaultIndex {
         }
         if Path::new(link).components().count() == 1 {
             let target_stem = Path::new(link).file_stem()?;
-            let mut matching = self
-                .notes
-                .iter()
-                .filter(|note| note.path.file_stem().is_some_and(|stem| stem == target_stem));
+            let mut matching = self.notes.iter().filter(|note| {
+                note.path
+                    .file_stem()
+                    .is_some_and(|stem| stem == target_stem)
+            });
             let first = matching.next()?;
             if matching.next().is_none() {
                 return Some(first.path.clone());
@@ -301,7 +303,11 @@ fn extract_inline_metadata(line: &str, tags: &mut BTreeSet<String>, links: &mut 
                 .chars()
                 .take_while(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '/'))
                 .collect();
-            if tag.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_') {
+            if tag
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphabetic() || c == '_')
+            {
                 let tag = tag.trim_end_matches('/');
                 if !tag.is_empty() {
                     tags.insert(tag.to_owned());

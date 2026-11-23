@@ -11,6 +11,7 @@ use thiserror::Error;
 
 mod live;
 mod syntax;
+mod math;
 mod media;
 pub use media::Loader as ImageLoader;
 mod search;
@@ -406,6 +407,22 @@ impl EditorBuffer {
             events
         } else { (false, false, false) };
         let mut raw_has_focus = false;
+
+        if self.mode==EditorMode::Source && self.formatting_allowed && self.raw_composition.is_none() && !raw_ime.0
+            && ui.input(|input|input.focused&&input.modifiers==Modifiers::NONE&&input.key_pressed(Key::Enter))
+            && ui.memory(|memory|memory.has_focus(edit_id))
+            && let Some(mut native)=egui::text_edit::TextEditState::load(ui.ctx(),edit_id)
+            && let Some(cursor)=native.cursor.char_range()
+            && cursor.primary.index==cursor.secondary.index
+            && let Some(continuation)=Document::parse(&self.source).line_continuation(cursor.primary.index)
+            && ui.input_mut(|input|input.consume_key(Modifiers::NONE,Key::Enter)) {
+            let to_byte=|position|self.source.char_indices().map(|(byte,_)|byte).chain(std::iter::once(self.source.len())).nth(position).unwrap_or(self.source.len());
+            let bytes=to_byte(continuation.range.start)..to_byte(continuation.range.end);
+            let target=continuation.range.start+continuation.text.chars().count();
+            self.source.replace_range(bytes,&continuation.text);
+            native.cursor.set_char_range(Some(egui::text::CCursorRange{primary:egui::text::CCursor::new(target),secondary:egui::text::CCursor::new(target),h_pos:None}));
+            native.store(ui.ctx(),edit_id);response.changed=true;
+        }
 
         match self.mode {
             EditorMode::Formatted => {

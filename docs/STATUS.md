@@ -1,6 +1,6 @@
 # Implementation status
 
-Diamond 0.5.0 is a source alpha for a native Rust desktop application on Arch Linux. Sync and Publish are excluded from the product scope.
+Diamond 0.6.0 is a source alpha for a native Rust desktop application on Arch Linux. Sync and Publish are excluded from the product scope.
 
 The workspace now contains six implemented crates: shared settings, a semantic
 Markdown engine, conflict-aware vault storage and search, native editor adapters,
@@ -20,7 +20,7 @@ Plugins stop on a worker before an orderly application exit. Proposed edits
 are rejected if the originating vault or document bytes have changed.
 
 The user confirmed that the prior 0.1 snapshot compiled successfully on their
-system. This 0.5.0 revision has not been compiled or run in this environment.
+system. This 0.6.0 revision has not been compiled or run in this environment.
 This snapshot is not a tested release or a claim of full Obsidian
 or VS Code parity. See the acceptance matrix for the supported subset and
 the remaining Markdown, Excalidraw, language-server and large-file work.
@@ -40,3 +40,7 @@ Adds semantic inline links/wikilinks and rules, source-preserving round task tog
 ## 0.5.0 source update
 
 Fixes independent list parsing across blanks/incomplete lines, empty-line reveal and a window-focus repaint loop. Adds committed-on-release sliders, no-clobber file rename with buffer retargeting, removes the redundant path row, and implements semantic GFM tables, standalone native images and shared cached syntax grammars for source/fences. Local images load automatically when visible; HTTP(S) requires a load click. Added regression tests include a headless unfocused-frame repaint check. None of the Rust tests, native rendering, real network image loading or Hyprland CPU behavior have been run in this environment.
+
+## 0.6.0 source update
+
+Adds nested container metadata/source maps, list/quote Enter continuation, mathematical-LaTeX objects, first-use numbered footnotes and in-document navigation, explicit code headings/gaps and stable larger task controls. GitHub source files were compared read-only against endstater/diamond at 1a495d05518e439f7df73a3d7609ad6b6f2c98ce. No remote writes, commits, PRs or pushes were performed. Delivery is a local update patch. Compilation and GUI runtime remain unverified here.

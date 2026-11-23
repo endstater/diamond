@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+latex-rust.workspace = true
 syntect.workspace = true
 image.workspace = true
 resvg.workspace = true
