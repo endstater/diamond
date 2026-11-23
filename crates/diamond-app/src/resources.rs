@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Resource policy belongs to the host, not to Markdown parsing or its widgets.
 use diamond_vault::Vault;
 use std::{
@@ -48,7 +49,9 @@ pub fn image_loader(vault: Vault, note: PathBuf) -> diamond_editor::ImageLoader 
                     _ => return Err("Image escapes the vault".into()),
                 }
             }
-            vault.read(&relative).map_err(|error| error.to_string())?
+            vault
+                .read_bounded(&relative, MAX)
+                .map_err(|error| error.to_string())?
         };
         if bytes.len() as u64 > MAX {
             return Err("Image exceeds 16 MiB".into());

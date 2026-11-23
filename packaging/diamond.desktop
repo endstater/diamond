@@ -9,3 +9,4 @@ Terminal=false
 Categories=Office;TextEditor;Development;
 StartupNotify=true
 MimeType=text/markdown;text/plain;
+Keywords=Markdown;Notes;Typst;Editor;

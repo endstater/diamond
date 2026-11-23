@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Explicit source/semantic coordinates for a caret-aware editor projection.
 
 use std::ops::Range;
@@ -38,9 +39,16 @@ pub struct BlockSourceMap {
 
 pub(super) fn build(document: &Document) -> SourceMap {
     let (source, ranges) = document.serialize_with_ranges();
-    let mut byte_boundaries = source.char_indices().map(|(byte, _)| byte).collect::<Vec<_>>();
+    let mut byte_boundaries = source
+        .char_indices()
+        .map(|(byte, _)| byte)
+        .collect::<Vec<_>>();
     byte_boundaries.push(source.len());
-    let to_scalar = |byte: usize| byte_boundaries.binary_search(&byte).expect("UTF-8 boundary");
+    let to_scalar = |byte: usize| {
+        byte_boundaries
+            .binary_search(&byte)
+            .expect("UTF-8 boundary")
+    };
     let mut blocks = Vec::with_capacity(ranges.len());
     let mut semantic_start = 0;
     for (block, bytes) in document.blocks().iter().zip(ranges) {
@@ -62,7 +70,10 @@ pub(super) fn build(document: &Document) -> SourceMap {
         let mut before = Vec::with_capacity(semantic_len + 1);
         let mut after = Vec::with_capacity(semantic_len + 1);
         if semantic_len == 0 {
-            let anchor = visible.empty_anchor.unwrap_or(content_end).min(fragment.len());
+            let anchor = visible
+                .empty_anchor
+                .unwrap_or(content_end)
+                .min(fragment.len());
             before.push(to_global(anchor));
             after.push(to_global(anchor));
         } else {
@@ -116,25 +127,53 @@ fn visible_mapping(source: &str, block: &Block) -> VisibleMapping {
         exact: true,
         empty_anchor: None,
     };
-    let base=if block.content_prefix.is_some(){crate::containers::prefix(source).bytes}else{0};
-    let source=if block.content_prefix.is_some(){source[base..].trim_end_matches(['\r','\n'])}else{source};
+    let base = if block.content_prefix.is_some() {
+        crate::containers::prefix(source).bytes
+    } else {
+        0
+    };
+    let source = if block.content_prefix.is_some() {
+        source[base..].trim_end_matches(['\r', '\n'])
+    } else {
+        source
+    };
     let mut code_block = false;
-    if block.kind == BlockKind::Image && block.image.as_ref().is_some_and(|image| image.alt.is_empty()) {
-        return VisibleMapping{text:block.text.clone(),spans:vec![0..0;block.text.chars().count()],exact:true,empty_anchor:Some(0)};
+    if block.kind == BlockKind::Image
+        && block
+            .image
+            .as_ref()
+            .is_some_and(|image| image.alt.is_empty())
+    {
+        return VisibleMapping {
+            text: block.text.clone(),
+            spans: vec![0..0; block.text.chars().count()],
+            exact: true,
+            empty_anchor: Some(0),
+        };
     }
     for (event, span) in parser(source).into_offset_iter() {
         match event {
             Event::Start(Tag::CodeBlock(_)) => code_block = true,
             Event::End(TagEnd::CodeBlock) => code_block = false,
-            Event::InlineMath(_)|Event::DisplayMath(_)=>{mapping.text.push('◇');mapping.spans.push(span);},
-            Event::FootnoteReference(_)=>{mapping.text.push('⁎');mapping.spans.push(span);},
-            Event::End(TagEnd::Paragraph) if block.kind==BlockKind::Footnote=>{
-                let anchor=mapping.spans.last().map_or(span.end,|last|last.end);
-                mapping.text.push('\n');mapping.spans.push(anchor..anchor);
-            },
-            Event::End(TagEnd::FootnoteDefinition) if block.kind==BlockKind::Footnote=>{
-                if mapping.text.ends_with('\n'){mapping.text.pop();mapping.spans.pop();}
-            },
+            Event::InlineMath(_) | Event::DisplayMath(_) => {
+                mapping.text.push('◇');
+                mapping.spans.push(span);
+            }
+            Event::FootnoteReference(_) => {
+                mapping.text.push('⁎');
+                mapping.spans.push(span);
+            }
+            Event::End(TagEnd::Paragraph) if block.kind == BlockKind::Footnote => {
+                let anchor = mapping.spans.last().map_or(span.end, |last| last.end);
+                mapping.text.push('\n');
+                mapping.spans.push(anchor..anchor);
+            }
+            Event::End(TagEnd::FootnoteDefinition) if block.kind == BlockKind::Footnote => {
+                if mapping.text.ends_with('\n') {
+                    mapping.text.pop();
+                    mapping.spans.pop();
+                }
+            }
             Event::Text(value) => {
                 let span = if code_block {
                     span
@@ -142,28 +181,39 @@ fn visible_mapping(source: &str, block: &Block) -> VisibleMapping {
                     include_backslash_escape(source, span, &value)
                 };
                 let (spans, exact) = text_spans(source, span, &value, !code_block);
-                mapping.empty_anchor = mapping.empty_anchor.or_else(|| spans.first().map(|s| s.start));
+                mapping.empty_anchor = mapping
+                    .empty_anchor
+                    .or_else(|| spans.first().map(|s| s.start));
                 mapping.text.push_str(&value);
                 mapping.spans.extend(spans);
                 mapping.exact &= exact;
             }
             Event::Code(value) => {
                 let (spans, exact) = inline_code_spans(source, span, &value);
-                mapping.empty_anchor = mapping.empty_anchor.or_else(|| spans.first().map(|s| s.start));
+                mapping.empty_anchor = mapping
+                    .empty_anchor
+                    .or_else(|| spans.first().map(|s| s.start));
                 mapping.text.push_str(&value);
                 mapping.spans.extend(spans);
                 mapping.exact &= exact;
             }
-            Event::End(TagEnd::TableCell) if block.kind==BlockKind::Table => {
-                let anchor=mapping.spans.last().map_or(span.start,|last|last.end);
-                mapping.text.push('\t');mapping.spans.push(anchor..anchor);
-            },
-            Event::End(TagEnd::TableHead|TagEnd::TableRow) if block.kind==BlockKind::Table => {
-                if mapping.text.ends_with('\t'){mapping.text.pop();mapping.text.push('\n');}
-            },
-            Event::End(TagEnd::Table) if block.kind==BlockKind::Table => {
-                if mapping.text.ends_with('\n'){mapping.text.pop();mapping.spans.pop();}
-            },
+            Event::End(TagEnd::TableCell) if block.kind == BlockKind::Table => {
+                let anchor = mapping.spans.last().map_or(span.start, |last| last.end);
+                mapping.text.push('\t');
+                mapping.spans.push(anchor..anchor);
+            }
+            Event::End(TagEnd::TableHead | TagEnd::TableRow) if block.kind == BlockKind::Table => {
+                if mapping.text.ends_with('\t') {
+                    mapping.text.pop();
+                    mapping.text.push('\n');
+                }
+            }
+            Event::End(TagEnd::Table) if block.kind == BlockKind::Table => {
+                if mapping.text.ends_with('\n') {
+                    mapping.text.pop();
+                    mapping.spans.pop();
+                }
+            }
             Event::SoftBreak => {
                 mapping.text.push('\n');
                 mapping.spans.push(span);
@@ -182,8 +232,14 @@ fn visible_mapping(source: &str, block: &Block) -> VisibleMapping {
     if block.kind == BlockKind::Code && mapping.empty_anchor.is_none() {
         mapping.empty_anchor = source.find('\n').map(|newline| newline + 1);
     }
-    for span in &mut mapping.spans {span.start+=base;span.end+=base;}
-    mapping.empty_anchor=mapping.empty_anchor.map(|anchor|anchor+base).or(Some(base));
+    for span in &mut mapping.spans {
+        span.start += base;
+        span.end += base;
+    }
+    mapping.empty_anchor = mapping
+        .empty_anchor
+        .map(|anchor| anchor + base)
+        .or(Some(base));
     mapping
 }
 
@@ -196,12 +252,19 @@ fn scalar_spans(source: &str, base: usize) -> Vec<Range<usize>> {
 
 fn include_backslash_escape(source: &str, mut span: Range<usize>, value: &str) -> Range<usize> {
     if span.start == 0
-        || !value.chars().next().is_some_and(|character| character.is_ascii_punctuation())
+        || !value
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_punctuation())
         || source[span.clone()].starts_with('\\')
     {
         return span;
     }
-    let preceding = source[..span.start].bytes().rev().take_while(|byte| *byte == b'\\').count();
+    let preceding = source[..span.start]
+        .bytes()
+        .rev()
+        .take_while(|byte| *byte == b'\\')
+        .count();
     if preceding % 2 == 1 {
         span.start -= 1;
     }
@@ -227,11 +290,7 @@ fn text_spans(
     (vec![span; value.chars().count()], false)
 }
 
-fn inline_code_spans(
-    source: &str,
-    span: Range<usize>,
-    value: &str,
-) -> (Vec<Range<usize>>, bool) {
+fn inline_code_spans(source: &str, span: Range<usize>, value: &str) -> (Vec<Range<usize>>, bool) {
     let raw = &source[span.clone()];
     let fence = raw.bytes().take_while(|byte| *byte == b'`').count();
     if fence == 0 || raw.len() < fence * 2 || !raw.ends_with(&"`".repeat(fence)) {
@@ -267,15 +326,26 @@ fn decode_atoms(
     let mut exact = true;
     while cursor < source.len() {
         let start = cursor;
-        let character = source[cursor..].chars().next().expect("cursor is in source");
+        let character = source[cursor..]
+            .chars()
+            .next()
+            .expect("cursor is in source");
         cursor += character.len_utf8();
         let atom = if character == '\r' || character == '\n' {
             if character == '\r' && source[cursor..].starts_with('\n') {
                 cursor += 1;
             }
-            if inline_code { " ".to_owned() } else { "\n".to_owned() }
+            if inline_code {
+                " ".to_owned()
+            } else {
+                "\n".to_owned()
+            }
         } else if decode_markdown && character == '\\' {
-            if let Some(next) = source[cursor..].chars().next().filter(|next| next.is_ascii_punctuation()) {
+            if let Some(next) = source[cursor..]
+                .chars()
+                .next()
+                .filter(|next| next.is_ascii_punctuation())
+            {
                 cursor += next.len_utf8();
                 next.to_string()
             } else {
@@ -283,9 +353,9 @@ fn decode_atoms(
             }
         } else if decode_markdown && character == '&' {
             let entity_end = source[cursor..].find(';').map(|end| cursor + end + 1);
-            if let Some((end, value)) = entity_end.and_then(|end| {
-                decode_entity(&source[start..end]).map(|value| (end, value))
-            }) {
+            if let Some((end, value)) = entity_end
+                .and_then(|end| decode_entity(&source[start..end]).map(|value| (end, value)))
+            {
                 cursor = end;
                 value
             } else {
@@ -299,7 +369,10 @@ fn decode_atoms(
         if atom.chars().count() > 1 {
             exact = false;
         }
-        spans.extend(std::iter::repeat_n(base + start..base + cursor, atom.chars().count()));
+        spans.extend(std::iter::repeat_n(
+            base + start..base + cursor,
+            atom.chars().count(),
+        ));
         decoded.push_str(&atom);
     }
     (decoded, spans, exact)

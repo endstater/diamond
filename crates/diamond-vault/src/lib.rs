@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Byte-preserving, conflict-aware access to an ordinary folder of files.
 
 mod index;
@@ -121,39 +122,50 @@ impl Vault {
         Ok(())
     }
 
-    /// Rename a regular file without replacing any destination. A same-directory
-    /// hard link + unlink is a no-clobber rename on the supported local filesystems.
+    /// Move files or whole folders; never replace a destination or follow links.
+    pub fn move_entry(&self, relative: &Path, target_relative: &Path) -> Result<PathBuf> {
+        let source = self.existing_path(relative)?;
+        if relative == target_relative {
+            return Ok(relative.into());
+        }
+        if source.is_dir() && target_relative.starts_with(relative) {
+            return Err(VaultError::InvalidPath(target_relative.into()));
+        }
+        let target = self.new_path(target_relative)?;
+        rustix::fs::renameat_with(
+            rustix::fs::CWD,
+            &source,
+            rustix::fs::CWD,
+            &target,
+            rustix::fs::RenameFlags::NOREPLACE,
+        )
+        .map_err(|error| {
+            let error = std::io::Error::from(error);
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                VaultError::AlreadyExists(target_relative.into())
+            } else {
+                io_error(&source, error)
+            }
+        })?;
+        if let Some(parent) = source.parent() {
+            let _ = sync_directory(parent);
+        }
+        if let Some(parent) = target.parent() {
+            let _ = sync_directory(parent);
+        }
+        Ok(target_relative.into())
+    }
+
     pub fn rename_file(&self, relative: &Path, name: &Path) -> Result<PathBuf> {
         if name.components().count() != 1
             || !matches!(name.components().next(), Some(Component::Normal(_)))
         {
             return Err(VaultError::InvalidPath(name.into()));
         }
-        let source = self.existing_path(relative)?;
-        if !source.is_file() {
-            return Err(VaultError::NotFile(relative.into()));
-        }
-        let target_relative = relative.parent().unwrap_or(Path::new("")).join(name);
-        if target_relative == relative {
-            return Ok(target_relative);
-        }
-        let target = self.new_path(&target_relative)?;
-        fs::hard_link(&source, &target).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                VaultError::AlreadyExists(target_relative.clone())
-            } else {
-                io_error(&target, e)
-            }
-        })?;
-        if let Err(error) = fs::remove_file(&source) {
-            let _ = fs::remove_file(&target);
-            return Err(io_error(&source, error));
-        }
-        // Once committed, report the new name even if a directory sync fails.
-        if let Some(parent) = target.parent() {
-            let _ = sync_directory(parent);
-        }
-        Ok(target_relative)
+        self.move_entry(
+            relative,
+            &relative.parent().unwrap_or(Path::new("")).join(name),
+        )
     }
 
     /// Explicit, permanent deletion of a validated vault-relative entry.
@@ -179,7 +191,8 @@ impl Vault {
         self.read_bounded(relative, MAX_FILE_BYTES)
     }
 
-    fn read_bounded(&self, relative: &Path, limit: u64) -> Result<Vec<u8>> {
+    pub fn read_bounded(&self, relative: &Path, limit: u64) -> Result<Vec<u8>> {
+        let limit = limit.min(MAX_FILE_BYTES);
         let path = self.existing_path(relative)?;
         let metadata = fs::metadata(&path).map_err(|e| io_error(&path, e))?;
         if !metadata.is_file() {
@@ -615,5 +628,41 @@ mod tests {
             .unwrap()
             .permissions();
         assert_eq!(permissions.mode() & 0o777, 0o640);
+    }
+}
+
+#[cfg(test)]
+mod move_tests {
+    use super::*;
+    #[test]
+    fn directory_moves_preserve_children_and_never_replace_or_recurse() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("from")).unwrap();
+        fs::create_dir(root.path().join("to")).unwrap();
+        fs::write(root.path().join("from/я.md"), b"unchanged").unwrap();
+        let vault = Vault::open(root.path()).unwrap();
+        assert!(
+            vault
+                .move_entry(Path::new("from"), Path::new("from/inside"))
+                .is_err()
+        );
+        assert!(
+            vault
+                .move_entry(Path::new("from"), Path::new("to"))
+                .is_err()
+        );
+        vault
+            .move_entry(Path::new("from"), Path::new("to/nested"))
+            .unwrap();
+        assert_eq!(
+            vault.read(Path::new("to/nested/я.md")).unwrap(),
+            b"unchanged"
+        );
+        assert!(!root.path().join("from").exists());
+        assert!(
+            vault
+                .move_entry(Path::new("to/nested/я.md"), Path::new("../escape.md"))
+                .is_err()
+        );
     }
 }

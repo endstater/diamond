@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use diamond_core::{AppSettings, ThemeMode};
 use egui::{Color32, Context, FontDefinitions, FontFamily};
 use std::path::PathBuf;
@@ -50,10 +51,10 @@ pub fn configure(ctx: &Context, settings: &AppSettings) {
         visuals.extreme_bg_color = gray(17, 250);
         visuals.faint_bg_color = gray(30, 235);
         visuals.code_bg_color = gray(28, 232);
-        visuals.override_text_color = Some(gray(226, 32));
+        visuals.override_text_color = None;
         visuals.weak_text_color = Some(gray(148, 100));
-        visuals.selection.bg_fill = accent.gamma_multiply(0.28);
-        visuals.selection.stroke = egui::Stroke::new(1.0, gray(245, 20));
+        visuals.selection.bg_fill = accent;
+        visuals.selection.stroke = egui::Stroke::new(1.0, gray(17, 250));
         visuals.hyperlink_color = accent;
         visuals.warn_fg_color = gray(208, 65);
         visuals.error_fg_color = gray(238, 35);
@@ -65,7 +66,7 @@ pub fn configure(ctx: &Context, settings: &AppSettings) {
                 &mut visuals.widgets.noninteractive,
                 gray(25, 244),
                 gray(43, 215),
-                gray(148, 100),
+                gray(226, 32),
             ),
             (
                 &mut visuals.widgets.inactive,
@@ -163,7 +164,6 @@ pub fn system_fonts() -> Vec<SystemFont> {
         .collect();
     fonts.sort_by(|a, b| a.name.cmp(&b.name));
     fonts.dedup_by(|a, b| a.name == b.name);
-    fonts.truncate(256);
     fonts
 }
 
@@ -203,6 +203,7 @@ fn load_font(path: &std::path::Path, index: u32) -> Option<egui::FontData> {
 
 pub fn install_font(ctx: &Context, settings: &AppSettings) -> Option<String> {
     let mut fonts = FontDefinitions::default();
+    install_color_emoji();
     let mut error = None;
     if let Some((path, index)) = cjk_font() {
         if let Some(data) = load_font(&path, index) {
@@ -257,4 +258,30 @@ pub fn font_family(_settings: &AppSettings) -> FontFamily {
 
 pub fn ui_size(ui: &egui::Ui, base: f32) -> f32 {
     base * egui::TextStyle::Body.resolve(ui.style()).size / 14.0
+}
+
+fn install_color_emoji() {
+    static LOADED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    LOADED.get_or_init(|| {
+        use std::io::Read;
+        if let Ok(output) = std::process::Command::new("fc-match")
+            .args(["-f", "%{file}", "Noto Color Emoji"])
+            .output()
+        {
+            if output.status.success()
+                && let Ok(path) = std::str::from_utf8(&output.stdout)
+                && let Ok(file) = std::fs::File::open(path)
+            {
+                let mut bytes = Vec::new();
+                if file
+                    .take(32 * 1024 * 1024 + 1)
+                    .read_to_end(&mut bytes)
+                    .is_ok()
+                    && bytes.len() <= 32 * 1024 * 1024
+                {
+                    diamond_editor::install_emoji_font(bytes);
+                }
+            }
+        }
+    });
 }

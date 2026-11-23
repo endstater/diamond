@@ -33,3 +33,11 @@ Settings is an ordinary document-area tab. It supports Dark/Light/System, accent
 0.4 defaults the interface to English, with Russian and Simplified Chinese settings. UI font and text size are independent from editor preferences; Fontconfig supplies a system CJK fallback. Vault folders start collapsed, click to expand/collapse and offer right-click delete with confirmation. Search cards have equal width and a full-card hit area, and the tab-strip frame fills the available width. The supplied user SVG is embedded.
 
 0.5 defers slider preference writes until pointer release, removes the extra path row beneath tabs, and adds a rename dialog. Sessions retarget open buffers without discarding unsaved content; renaming away from .md also removes Live mode. resources.rs supplies safe vault-relative image reads and explicitly requested HTTP(S) fetches with finite time/byte limits. Image decoding runs in the editor worker.
+
+0.7 orchestrates prepared-plugin installation and protocol v2 native split views.
+Plugin rendering and PNG decode run off the GUI thread; document revisions guard
+stale frames. Editable view sources opt into existing conflict-aware autosave.
+Directory moves retarget open buffers and image loaders. File CLI arguments use a
+light session without directory enumeration or a watcher/index. Notifications
+expire after three seconds with a one-shot repaint deadline, not a polling loop.
+See packaging/PKGBUILD.local for an Arch package built from the current checkout.

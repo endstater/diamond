@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
 """Portable source checks; these do not compile or type-check Rust."""
 
 import ast

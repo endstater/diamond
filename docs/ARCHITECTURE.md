@@ -9,10 +9,9 @@ This architecture was written before implementation. The initial implementation 
 The application is native Rust, using pinned egui/eframe 0.33.0 with the OpenGL renderer, native windowing, clipboard and IME. Browser engines are absent from the default workspace. Markdown remains ordinary `.md` files in an ordinary folder. A cache is never the source of truth.
 
 The default UI has a narrow activity rail, resizable vault tree, document tabs,
-a centered editor, an optional inspector and a readable status bar. All surfaces,
-text, selection and accents use black/gray shades. Controls share an 8/12/16
+a centered editor, an optional inspector and a readable status bar. Surfaces use black/gray shades with configurable solid pastel accents and contrasting selected text. Controls share an 8/12/16
 spacing grid and larger rounded corners. Icons use native vector geometry rather
-than font glyphs; the faceted diamond and window icon are grayscale. Animations
+than font glyphs; the diamond and window icon use the project owner’s supplied SVG. Animations
 are short and time-based; reduced motion disables interpolation.
 
 ## Dependency direction
@@ -124,3 +123,37 @@ Containers preserve indentation, quote depth and a prefix boundary for every phy
 Mathematical LaTeX and footnotes are structural semantic atoms with complete source spans; their rendered glyphs occupy reserved space in the same native TextEdit, not an independent preview over editable Markdown. The math engine cannot run shell commands or fetch fonts. Numbered footnote references resolve to in-document source positions. Code-language headers/gaps also have explicit structural projection/source anchors.
 
 Task controls keep stable IDs and hit regions across reveal changes, take focus for pointer interaction, and retain the existing document-level toggle transaction. The renderer's later frames do not depend on a disappearing decoration to complete a click.
+
+## 0.7 document views and resource boundaries
+
+Protocol v2 preserves v1 and adds typed view descriptors, bounded PNG pages,
+diagnostics, source scalar anchors, page-window and navigation events. The app
+owns tab source buffers, autosave/conflict checks and egui split UI. A single
+plugin worker processes one request at a time, with an edit debounce and revision
+checks; binary page decode also runs there. Future PDF/Typst engines live outside
+the core. Installing prepared files from a folder or strict GitHub repository URL
+is separate from launching; no install/build hooks run. See PLUGINS.md.
+
+Image tabs no longer build HEX eagerly or parse SVG as Markdown. Image byte reads
+are capped at 16 MiB, decode dimensions at 4096, and cached thumbnails at 1200.
+Invalid/oversized resources draw a bounded hatched square and a background label.
+The source/editor model remains the owner of bytes; view switches do not mark the
+file edited. HEX is explicit and cannot silently replace unreadable content.
+
+Collapsed tables reserve one mapped structural row and paint native cell controls
+inside their own horizontal scroll viewport. Table operations replace just the
+source table while preserving inline Markdown, outside bytes, EOL and Undo.
+Formula objects use a measured real glyph advance instead of relying on trailing
+letter spacing. Native color emoji overlay shaped color glyphs without changing
+text bytes or scalar cursor positions. System color fonts are optional.
+
+File/directory moves use Linux renameat2 NOREPLACE via rustix, validated paths and
+updated open-tab paths/resource loaders. No link rewriting is performed.
+The single-file CLI path creates no sibling enumeration/index/watcher or recent
+vault entry. Normal directory launch retains the vault/watch path.
+
+0.7.1 fixes view registration state ownership (`PluginHost.views`, not the
+commands-list DTO) and keeps commands replies compatible with v1. SVG previews
+accept UTF-8 BOM/comments/XML declarations and scale large vector viewports to
+a bounded 1200-pixel raster; raster input limits and disabled external SVG image
+resolvers remain unchanged. First-party licensing is GPL-3.0-only.

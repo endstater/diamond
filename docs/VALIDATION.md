@@ -110,3 +110,67 @@ The user's compiler reported E0689 at parse_inline's table-row saturating_sub ca
 API latex-rust 2.1.1 (MathFont/STIX, SvgOptions, latex_to_svg), тэги math/footnote pulldown-cmark 0.13.6 и native egui 0.33.0 сверены по первичным исходникам. Optional egui backend математической библиотеки выключен; доступ к пользовательским шрифтам математическому парсеру не даётся.
 
 На целевой машине после применения: cargo fmt --all, cargo build --release -p diamond-app (разрешить обновление Cargo.lock), cargo test --workspace, cargo clippy --workspace --all-targets -- -D warnings. Проверить pointer hover/press/release, checked tick и Ctrl+Z, Enter и Shift+Enter в Live/Source, 2–3 уровня смешанных списков/задач и цитат, пустые пункты, $inline$ / $$display$$ в абзаце/списке/таблице и ошибочную формулу, повторную сноску/Ctrl+click, рамку кода под предыдущим текстом и язык text/Rust/Python. Desktop/Hyprland и потребление CPU после этих изменений не измерялись.
+
+## 0.7.0 — 2026-11-23
+
+The user's previous 0.6 file updater was confirmed working by the user. This
+iteration changes the source to 0.7.0; there is still no Rust toolchain in this
+preparation environment. No cargo build/test/clippy, rustfmt, GUI run, native
+package build, desktop rendering/performance or git-network installation is
+claimed. Static checks cannot validate types, borrows or resolved dependency
+versions. Downloading a Rust toolchain was unavailable here.
+
+Executed checks: scripts/check_sources.py (workspace paths, TOML/JSON/Python/SVG,
+crate GUI boundaries), Pygments Rust lexical tokens/delimiter balance, bash syntax
+for both PKGBUILDs and check.sh, actual subprocess JSON-RPC tests of v1 and v2
+Python examples. V2 checks verify PNG signature/dimensions, revision IDs,
+Unicode scalar anchors and click-to-source navigation. The source-update archive
+is byte/hash verified, and updater tests cover backup of local modifications,
+check-only behavior, corrupt payload rejection, symlink refusal, preserved
+.git/target/Cargo.lock, repeat installation and rollback on simulated write failure.
+
+New Rust tests (not run) target file/folder no-replace moves, light file sessions,
+nested task extraction, table Markdown preservation and Undo, deferred image HEX,
+real extended grammar definitions, view frame bounds/NaN rejection and actual
+v2 process startup/view rendering. The source count is recorded by the packaging
+check rather than implying that any Rust test passed.
+
+On Arch after updating, run cargo fmt --all, cargo build --release -p diamond-app,
+cargo test --workspace, cargo clippy --workspace --all-targets -- -D warnings.
+Allow Cargo.lock to update for Two-face/Syntect 5.3/Swash/rustix. For desktop
+acceptance: test giant/corrupt PNG/JPEG/SVG and HEX switches, local/remote note
+images, header gap/opacity on Hyprland at multiple scale factors, collapsed and
+revealed wide tables (including context menus/Undo/escaped pipes), long math
+inside paragraphs and lists, array shorthand, post-fence spacing, nested task
+clicks/progress and reduced motion, full font list/Montserrat and color emoji with
+Noto Color Emoji, Enter submission, no-replace folder rename/drag with dirty tabs,
+CLI folder/file mode and makepkg -si -p PKGBUILD.local. Install the native-preview
+example from its folder, launch explicitly, open a .previewdemo file, select the
+view, edit/save and test source/preview wheel and click mapping. Test GitHub
+installation on a network-enabled machine with a prepared public repository.
+
+## 0.7.1 — 2026-11-23
+
+The user's Rust compiler exposed that `views` had been inserted into the
+`Commands` response DTO instead of `PluginHost`. The field now belongs to the
+host; removing it from the DTO also prevents v1 JSON responses from failing
+with a missing-field error. Existing v1/v2 process integration tests cover this
+protocol boundary when run with Cargo. SVG regression tests add real path
+rasterization, XML declarations, BOM/long comments, a 10000×5000 vector viewport
+scaled to 1200×600 and malformed XML rejection. These Rust tests are not run
+here: Rust/Cargo remains unavailable. Do not interpret structural/lexical checks
+as compiler, borrowing or native GUI validation.
+
+License change: root LICENSE is the verbatim GNU GPL v3 text, Cargo metadata and
+both Arch package recipes use GPL-3.0-only, and first-party source files carry
+SPDX notices. The earlier MIT text and attribution are kept separately; bundled
+third-party license files are unchanged. README is a short English overview with
+the owner's SVG, features, source launch and Arch installation commands.
+
+Preparation checks: TOML/JSON/Python/SVG structure, Rust lexical balance, shell
+syntax, actual v1/v2 Python protocol fixtures and updater backup/rollback tests.
+The update payload and archive bytes are compared against the prepared sources.
+On the target machine run cargo fmt --all, cargo test --workspace, cargo clippy
+--workspace --all-targets -- -D warnings and cargo run --release -p diamond-app.
+Verify launching the old uppercase plugin and v2 preview example, opening SVG
+in Image by default and switching to/from Hex without altering file bytes.

@@ -45,3 +45,18 @@ host.stop()?;
 ```
 
 `PluginOutput` has `replacement: Option<String>` and `message: Option<String>`. Nothing is automatically written to disk or applied to an editor. See `examples/plugins/uppercase` for a runnable implementation using only Python's standard library.
+
+## Protocol v2
+
+The host accepts manifests declaring version 1 or 2. V2 adds `document_views`
+and optional `document_read`, `views/list` and `views/update`. Files install
+without execution through `install::install` from a prepared folder or a strict
+GitHub repository URL. Detailed schemas, timeouts, page windows, limits and
+ownership are in [PLUGINS.md](../../docs/PLUGINS.md). V1 capabilities stay valid;
+new capabilities require v2. The app currently runs one plugin process at a time.
+
+0.7.1 fixes view registration state ownership (`PluginHost.views`, not the
+commands-list DTO) and keeps commands replies compatible with v1. SVG previews
+accept UTF-8 BOM/comments/XML declarations and scale large vector viewports to
+a bounded 1200-pixel raster; raster input limits and disabled external SVG image
+resolvers remain unchanged. First-party licensing is GPL-3.0-only.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Static translations: no runtime files, global state or language service.
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +14,79 @@ pub enum Language {
 impl Language {
     pub fn text(self, key: &'static str) -> &'static str {
         let (en, ru, zh) = match key {
+            "Syntax licenses" => (
+                "Syntax licenses",
+                "Лицензии грамматик подсветки",
+                "语法高亮许可证",
+            ),
+            "Color emoji need a system color font, such as noto-fonts-emoji. Restart after installing fonts." => {
+                (
+                    "Color emoji need a system color font, such as noto-fonts-emoji. Restart after installing fonts.",
+                    "Для цветных эмодзи нужен системный цветной шрифт, например noto-fonts-emoji. После установки шрифтов перезапустите Diamond.",
+                    "彩色表情需要系统彩色字体，例如 noto-fonts-emoji。安装字体后请重启 Diamond。",
+                )
+            }
+            "Edit cell source" => (
+                "Edit cell source",
+                "Редактировать исходник ячейки",
+                "编辑单元格源码",
+            ),
+            "Scroll speed" => ("Scroll speed", "Скорость прокрутки", "滚动速度"),
+            "Toggle left sidebar" => (
+                "Toggle left sidebar",
+                "Скрыть или показать левую панель",
+                "切换左侧栏",
+            ),
+            "Rename folder" => ("Rename folder", "Переименовать папку", "重命名文件夹"),
+            "Image" => ("Image", "Изображение", "图片"),
+            "Image cannot be read" => (
+                "Image cannot be read",
+                "Изображение не читается",
+                "无法读取图片",
+            ),
+            "Sync scrolling" => ("Sync scrolling", "Синхронная прокрутка", "同步滚动"),
+            "Waiting for preview…" => {
+                ("Waiting for preview…", "Ожидаем превью…", "正在等待预览…")
+            }
+            "GitHub repository URL or plugin folder" => (
+                "GitHub repository URL or plugin folder",
+                "Ссылка на GitHub или папка плагина",
+                "GitHub 仓库链接或插件文件夹",
+            ),
+            "Install plugin" => ("Install plugin", "Установить плагин", "安装插件"),
+            "Choose plugin folder…" => (
+                "Choose plugin folder…",
+                "Выбрать папку плагина…",
+                "选择插件文件夹…",
+            ),
+            "Open manifest directly" => (
+                "Open manifest directly",
+                "Открыть манифест напрямую",
+                "直接打开清单",
+            ),
+            "Plugin installed. Select it to review and launch." => (
+                "Plugin installed. Select it to review and launch.",
+                "Плагин установлен. Выберите его для просмотра и запуска.",
+                "插件已安装。请选择插件以查看并启动。",
+            ),
+            "Insert row above" => ("Insert row above", "Добавить строку выше", "在上方插入行"),
+            "Insert row below" => ("Insert row below", "Добавить строку ниже", "在下方插入行"),
+            "Delete row" => ("Delete row", "Удалить строку", "删除行"),
+            "Insert column before" => (
+                "Insert column before",
+                "Добавить столбец слева",
+                "在左侧插入列",
+            ),
+            "Insert column after" => (
+                "Insert column after",
+                "Добавить столбец справа",
+                "在右侧插入列",
+            ),
+            "Delete column" => ("Delete column", "Удалить столбец", "删除列"),
+            "Align left" => ("Align left", "По левому краю", "左对齐"),
+            "Align center" => ("Align center", "По центру", "居中"),
+            "Align right" => ("Align right", "По правому краю", "右对齐"),
+
             "Настройки" => ("Settings", "Настройки", "设置"),
             "Сохраняются автоматически для всех хранилищ" => {
                 (
@@ -69,11 +143,11 @@ impl Language {
                     "实时 Markdown 自动保存。查找：Ctrl+F；搜索仓库：Ctrl+Shift+F；Esc 关闭查找。",
                 )
             }
-            "Иконка: diamond2.svg рядом с Cargo.toml или исполняемым файлом. Приложение подхватит её при следующем запуске." => {
+            "Иконка: diamond.svg рядом с Cargo.toml или исполняемым файлом. Приложение подхватит её при следующем запуске." => {
                 (
-                    "Your SVG is bundled. To override it, place diamond2.svg beside the executable and restart.",
-                    "Иконка: diamond2.svg рядом с Cargo.toml или исполняемым файлом. Приложение подхватит её при следующем запуске.",
-                    "已内置自定义 SVG。将 diamond2.svg 放在程序旁并重启即可替换图标。",
+                    "Your SVG is bundled. To override it, place diamond.svg beside the executable and restart.",
+                    "Иконка: diamond.svg рядом с Cargo.toml или исполняемым файлом. Приложение подхватит её при следующем запуске.",
+                    "已内置自定义 SVG。将 diamond.svg 放在程序旁并重启即可替换图标。",
                 )
             }
             "Сбросить настройки внешнего вида" => (

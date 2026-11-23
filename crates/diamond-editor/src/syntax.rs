@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Cached grammar-based highlighting shared by source buffers and fenced blocks.
 use egui::{Color32, Context};
 use std::ops::Range;
@@ -31,6 +32,20 @@ static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
 static THEMES: OnceLock<ThemeSet> = OnceLock::new();
 
 pub fn spans(ctx: &Context, text: &str, language: &str, dark: bool) -> Arc<Vec<Span>> {
+    if text.len() > 512 * 1024 || text.lines().any(|line| line.len() > 16384) {
+        return Arc::new(vec![Span {
+            bytes: 0..text.len(),
+            scalars: 0..text.chars().count(),
+            color: if dark {
+                Color32::LIGHT_GRAY
+            } else {
+                Color32::DARK_GRAY
+            },
+            italic: false,
+            bold: false,
+            underline: false,
+        }]);
+    }
     let id = egui::Id::new("diamond-syntax-cache");
     if let Some(hit) = ctx.data_mut(|data| {
         data.get_temp_mut_or_default::<Cache>(id)
@@ -41,22 +56,27 @@ pub fn spans(ctx: &Context, text: &str, language: &str, dark: bool) -> Arc<Vec<S
     }) {
         return hit;
     }
-    let syntaxes = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
+    let syntaxes = SYNTAXES.get_or_init(two_face::syntax::extra_newlines);
     let themes = THEMES.get_or_init(ThemeSet::load_defaults);
     let requested = language;
     let language = language.split_whitespace().next().unwrap_or("txt");
     let language = match language.to_ascii_lowercase().as_str() {
-        "js" | "jsx" => "javascript",
-        "ts" | "tsx" => "typescript",
+        "js" => "javascript",
+        "jsx" => "jsx",
+        "ts" => "typescript",
+        "tsx" => "tsx",
         "py" => "python",
         "rs" => "rust",
         "c++" | "cxx" | "cc" | "hpp" => "cpp",
         "sh" | "zsh" | "shell" => "bash",
         "yml" => "yaml",
+        "dockerfile" => "Dockerfile",
+        "makefile" => "Makefile",
         _ => language,
     };
     let syntax = syntaxes
-        .find_syntax_by_token(language)
+        .find_syntax_by_name(language)
+        .or_else(|| syntaxes.find_syntax_by_token(language))
         .or_else(|| syntaxes.find_syntax_by_extension(language))
         .or_else(|| {
             if matches!(language, "typescript" | "tsx" | "ts") {
@@ -180,6 +200,20 @@ mod tests {
                     .any(|color| color != runs[0].color)
             );
             assert!(Arc::ptr_eq(&runs, &spans(&ctx, text, language, true)));
+        }
+    }
+}
+
+#[cfg(test)]
+mod extra_language_tests {
+    #[test]
+    fn modern_language_grammars_are_real_definitions() {
+        let syntaxes = two_face::syntax::extra_newlines();
+        for extension in ["ts", "tsx", "typ", "kt", "toml", "swift", "zig"] {
+            assert!(
+                syntaxes.find_syntax_by_extension(extension).is_some(),
+                "Missing {extension}"
+            );
         }
     }
 }

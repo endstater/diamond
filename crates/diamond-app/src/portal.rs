@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 
@@ -8,16 +9,12 @@ pub enum Choice {
     Unavailable(String),
 }
 
-pub fn choose(folder: bool, ctx: egui::Context) -> Receiver<Choice> {
+pub fn choose(folder: bool, title: String, ctx: egui::Context) -> Receiver<Choice> {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
         let result = pollster::block_on(async {
             let request = ashpd::desktop::file_chooser::SelectedFiles::open_file()
-                .title(if folder {
-                    "Открыть хранилище"
-                } else {
-                    "Открыть манифест плагина"
-                })
+                .title(Some(title.as_str()))
                 .directory(folder)
                 .multiple(false)
                 .send()

@@ -8,3 +8,5 @@ license.workspace = true
 [dependencies]
 thiserror.workspace = true
 tempfile.workspace = true
+rustix.workspace = true
+diamond-document.workspace = true

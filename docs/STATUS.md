@@ -1,3 +1,24 @@
+# Current snapshot: 0.7.1
+
+0.7.1 corrects PluginHost view storage and the v1/v2 commands response schema,
+changes first-party licensing to GPL-3.0-only, replaces the public README with a
+short English introduction and improves native SVG recognition/scaling.
+
+Source implementation adds v2 document-view plugins and a native split host,
+folder/GitHub installation, bounded native image tabs/lazy HEX, structural table
+menus and independent horizontal scrolling, file/directory moves and rename,
+single-file launch mode, extra syntax grammars, native color emoji, updated
+appearance and a local-checkout Arch package recipe. See README and PLUGINS.md.
+
+This snapshot has not been compiled here. Python v1/v2 examples, source structure,
+lexical balance, shell syntax and updater backup/rollback are checked separately;
+none are a substitute for Rust type/borrow checking or a desktop acceptance run.
+PDF/Typst engines are not included; one plugin process and one native preview are
+active at a time. Precise Typst mappings, PDF selection and zoom remain plugin/host
+extension work. Native source/preview synchronization uses supplied anchors.
+
+The following records describe earlier snapshots and their supported scope.
+
 # Implementation status
 
 Diamond 0.6.0 is a source alpha for a native Rust desktop application on Arch Linux. Sync and Publish are excluded from the product scope.

@@ -1,8 +1,13 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Language-independent, explicitly launched Diamond plugins.
 //!
 //! The process has the user's OS permissions. Capabilities constrain only the
 //! information passed through this protocol; they do not provide a sandbox.
 //! Startup and invocation are blocking and belong on an application worker.
+
+pub mod install;
+mod views;
+pub use views::*;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -18,7 +23,7 @@ use std::thread;
 use std::time::Duration;
 use thiserror::Error;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 pub const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 pub const MAX_SELECTION_BYTES: usize = 256 * 1024;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(3);
@@ -48,6 +53,8 @@ pub enum PluginError {
 pub enum Capability {
     SelectionRead,
     SelectionReplace,
+    DocumentRead,
+    DocumentViews,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,7 +105,7 @@ impl PluginManifest {
                 "name must contain 1–128 non-control characters".into(),
             ));
         }
-        if self.protocol_version != PROTOCOL_VERSION {
+        if !matches!(self.protocol_version, 1 | 2) {
             return Err(PluginError::Manifest(format!(
                 "unsupported protocol version {}",
                 self.protocol_version
@@ -121,11 +128,26 @@ impl PluginManifest {
         if self.capabilities.iter().any(|cap| !seen.insert(*cap)) {
             return Err(PluginError::Manifest("duplicate capability".into()));
         }
+        if self.protocol_version == 1
+            && self.capabilities.iter().any(|capability| {
+                matches!(
+                    capability,
+                    Capability::DocumentRead | Capability::DocumentViews
+                )
+            })
+        {
+            return Err(PluginError::Manifest(
+                "Document views require protocol version 2".into(),
+            ));
+        }
         Ok(())
     }
 }
 
 fn valid_id(value: &str) -> bool {
+    if matches!(value, "." | "..") {
+        return false;
+    }
     !value.is_empty()
         && value.len() <= 96
         && value
@@ -178,6 +200,7 @@ pub struct PluginHost {
     replies: Receiver<WireReply>,
     overflowed: Arc<AtomicBool>,
     commands: Vec<PluginCommand>,
+    views: Vec<ViewDescriptor>,
     next_id: u64,
     timeout: Duration,
 }
@@ -248,14 +271,15 @@ impl PluginHost {
             replies: reply_rx,
             overflowed,
             commands: Vec::new(),
+            views: Vec::new(),
             next_id: 1,
             timeout,
         };
         let initialized: Initialized = serde_json::from_value(host.request(
             "initialize",
-            json!({"protocol_version":PROTOCOL_VERSION,"capabilities":host.manifest.capabilities}),
+            json!({"protocol_version":host.manifest.protocol_version,"capabilities":host.manifest.capabilities}),
         )?)?;
-        if initialized.protocol_version != PROTOCOL_VERSION {
+        if initialized.protocol_version != host.manifest.protocol_version {
             return Err(PluginError::Protocol(
                 "plugin selected an unsupported version".into(),
             ));
@@ -272,6 +296,30 @@ impl PluginHost {
             ));
         }
         host.commands = commands.commands;
+        if host.manifest.protocol_version == 2
+            && host
+                .manifest
+                .capabilities
+                .contains(&Capability::DocumentViews)
+        {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Views {
+                views: Vec<ViewDescriptor>,
+            }
+            let views: Views = serde_json::from_value(host.request("views/list", json!({}))?)?;
+            if views.views.len() > 32 {
+                return Err(PluginError::Protocol("Too many views".into()));
+            }
+            let mut ids = HashSet::new();
+            for view in &views.views {
+                view.validate()?;
+                if !ids.insert(view.id.clone()) {
+                    return Err(PluginError::Protocol("Duplicate view id".into()));
+                }
+            }
+            host.views = views.views;
+        }
         Ok(host)
     }
 
@@ -336,6 +384,47 @@ impl PluginHost {
                 Err(error)
             }
         }
+    }
+
+    pub fn views(&self) -> &[ViewDescriptor] {
+        &self.views
+    }
+
+    /// Caller runs this on a worker and discards frames for stale revisions.
+    pub fn update_view(
+        &mut self,
+        mut document: ViewDocument,
+        event: Option<ViewEvent>,
+    ) -> Result<ViewFrame, PluginError> {
+        if !self
+            .manifest
+            .capabilities
+            .contains(&Capability::DocumentViews)
+            || !self.views.iter().any(|view| view.id == document.view)
+        {
+            return Err(PluginError::Protocol("View is not registered".into()));
+        }
+        if !self
+            .manifest
+            .capabilities
+            .contains(&Capability::DocumentRead)
+        {
+            document.text = None;
+        }
+        if document
+            .text
+            .as_ref()
+            .is_some_and(|text| text.len() > 512 * 1024)
+        {
+            return Err(PluginError::Protocol("View source exceeds 512 KiB".into()));
+        }
+        let previous = self.timeout;
+        self.timeout = Duration::from_secs(30);
+        let result = self.request("views/update", json!({"document":document,"event":event}));
+        self.timeout = previous;
+        let frame: ViewFrame = serde_json::from_value(result?)?;
+        frame.validate()?;
+        Ok(frame)
     }
 
     fn request(&mut self, method: &str, params: Value) -> Result<Value, PluginError> {
@@ -503,7 +592,7 @@ for line in sys.stdin:
     #[test]
     fn rejects_bad_versions_duplicate_capabilities_and_unknown_fields() {
         let mut item = manifest();
-        item.protocol_version = 2;
+        item.protocol_version = 3;
         assert!(item.validate().is_err());
         item.protocol_version = 1;
         item.capabilities.push(Capability::SelectionRead);
@@ -625,5 +714,51 @@ time.sleep(10)
         ));
         assert!(started.elapsed() < Duration::from_secs(2));
         assert!(!host.is_running());
+    }
+}
+
+#[cfg(test)]
+mod view_integration_tests {
+    use super::*;
+    #[test]
+    fn v2_fixture_registers_views_and_returns_unicode_scalar_anchors() {
+        let manifest = PluginManifest {
+            id: "test.preview".into(),
+            name: "Preview".into(),
+            protocol_version: 2,
+            program: "python3".into(),
+            args: vec![
+                "-u".into(),
+                "-c".into(),
+                include_str!("../../../examples/plugins/native-preview/plugin.py").into(),
+            ],
+            capabilities: vec![Capability::DocumentRead, Capability::DocumentViews],
+            manifest_dir: None,
+        };
+        let mut host = PluginHost::start(manifest).unwrap();
+        assert_eq!(host.views().len(), 1);
+        let text = "я🙂\n你好\n";
+        let frame = host
+            .update_view(
+                ViewDocument {
+                    view: "lines".into(),
+                    document_id: "opaque".into(),
+                    revision: 3,
+                    file_path: "/unused.previewdemo".into(),
+                    text: Some(text.into()),
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(frame.revision, 3);
+        assert_eq!(frame.pages.len(), 1);
+        assert_eq!(frame.anchors[1].offset, 3);
+        assert!(
+            frame
+                .anchors
+                .iter()
+                .all(|anchor| anchor.offset <= text.chars().count())
+        );
+        host.stop().unwrap();
     }
 }

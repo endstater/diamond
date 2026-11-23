@@ -1,6 +1,6 @@
 [package]
 name = "diamond-app"
-version = "0.6.0"
+version = "0.7.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -10,6 +10,7 @@ name = "diamond"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "=0.22.1"
 ureq.workspace = true
 notify.workspace = true
 ashpd.workspace = true

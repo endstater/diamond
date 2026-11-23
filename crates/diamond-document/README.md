@@ -24,3 +24,7 @@ the editor displays source rather than guessing destructive offsets.
 0.6 adds explicit indentation, quote levels and per-line container content anchors. Simple nested/mixed lists, tasks, lazy continuation lines and multiline/nested quotes retain original prefixes and bytes. GUI-independent `line_continuation` proposes a single source transaction for ordered/bullet/task continuation, parent-level exit and quote continuation; code and display math are excluded.
 
 Math is enabled through pulldown-cmark: inline/display expressions become explicit semantic object atoms (`◇`) with owned TeX, not concealed Markdown delimiters. Footnote references use semantic reference atoms (`⁎`), labels, deterministic first-use numbering and internal links; definitions retain their label and original source. OLD_FOOTNOTES grammar is used so isolated source fragments recognize references independently of where definitions are stored. Source maps attach each atom to its complete original source span. Legacy semantic mutations that cannot retain these structures fail; live source transactions reparse and preserve history.
+
+0.7 `edit_table` performs one undoable source transaction for row/column insertion,
+deletion and alignment. It preserves raw inline Markdown, escaped pipes and the
+rest of the document, and protects the header/last column from invalid deletion.

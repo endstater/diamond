@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Shared settings without GUI dependencies or filesystem policy.
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,8 @@ pub struct AppSettings {
     pub reduced_motion: bool,
     pub editor_font_size: f32,
     pub show_inspector: bool,
+    pub show_sidebar: bool,
+    pub scroll_speed: f32,
     pub recent_vaults: Vec<PathBuf>,
     pub theme: ThemeMode,
     pub accent: [u8; 3],
@@ -49,9 +52,11 @@ impl Default for AppSettings {
             reduced_motion: false,
             editor_font_size: 17.0,
             show_inspector: true,
+            show_sidebar: true,
+            scroll_speed: 1.0,
             recent_vaults: Vec::new(),
             theme: ThemeMode::Dark,
-            accent: [224, 224, 224],
+            accent: [123, 178, 255],
             editor_font: "sans".into(),
             editor_font_path: None,
             code_font_size: 15.0,

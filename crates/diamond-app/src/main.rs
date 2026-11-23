@@ -1,4 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
 mod icons;
+mod plugin_preview;
 mod portal;
 mod resources;
 mod session;
@@ -22,7 +24,26 @@ use session::{PendingAction, Session};
 use workers::{PluginEvent, PluginRequest, PluginWorker};
 
 fn main() -> eframe::Result {
-    let root = std::env::args_os().nth(1).map(PathBuf::from);
+    let argument = std::env::args_os().nth(1);
+    match argument.as_ref().and_then(|value| value.to_str()) {
+        Some("--version" | "-V") => {
+            println!("Diamond {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Some("--syntax-licenses") => {
+            println!("{}", diamond_editor::syntax_licenses());
+            return Ok(());
+        }
+        Some("--help" | "-h") => {
+            println!(
+                "Diamond {}\nUsage: diamond [FOLDER | FILE]\n  FOLDER  Open or add a vault\n  FILE    Open one file without indexing its directory\n  --version  Print version\n  --syntax-licenses  Print bundled grammar acknowledgements",
+                env!("CARGO_PKG_VERSION")
+            );
+            return Ok(());
+        }
+        _ => {}
+    }
+    let root = argument.map(|argument| expand_user_path(PathBuf::from(argument)));
     let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty())
         || std::env::var_os("WAYLAND_SOCKET").is_some_and(|value| !value.is_empty());
     let override_ = std::env::var("DIAMOND_VSYNC").ok();
@@ -144,6 +165,9 @@ struct DiamondApp {
     settings: AppSettings,
     panel: Panel,
     message: Option<String>,
+    toast_seen: Option<String>,
+    toast_until: Option<Instant>,
+    light_mode: bool,
     vault_input: String,
     open_dialog: bool,
     note_input: String,
@@ -167,7 +191,12 @@ struct DiamondApp {
     files_changed_at: Option<Instant>,
     portal_receiver: Option<Receiver<portal::Choice>>,
     portal_folder: bool,
-    plugin_manual: bool,
+    plugin_install_folder: bool,
+    plugin_install_receiver:
+        Option<Receiver<Result<diamond_plugin::install::InstalledPlugin, String>>>,
+    installed_plugins: Vec<diamond_plugin::install::InstalledPlugin>,
+    plugin_views: Vec<diamond_plugin::ViewDescriptor>,
+    preview: Option<plugin_preview::Preview>,
     index_pending: bool,
     index_generation: u64,
     vault_search_generation: u64,
@@ -210,6 +239,9 @@ impl DiamondApp {
             settings,
             panel: Panel::Files,
             message: message.or(font_error),
+            toast_seen: None,
+            toast_until: None,
+            light_mode: initial_file.is_some(),
             vault_input: String::new(),
             open_dialog: false,
             note_input: String::new(),
@@ -233,7 +265,11 @@ impl DiamondApp {
             files_changed_at: None,
             portal_receiver: None,
             portal_folder: true,
-            plugin_manual: false,
+            plugin_install_folder: false,
+            plugin_install_receiver: None,
+            installed_plugins: diamond_plugin::install::installed(&plugin_directory()),
+            plugin_views: Vec::new(),
+            preview: None,
             index_pending: false,
             index_generation: 0,
             vault_search_generation: u64::MAX,
@@ -255,24 +291,22 @@ impl DiamondApp {
             plugin_input: None,
             replacement: None,
         };
-        if let Some(root) = root {
+        if let Some(file) = initial_file {
+            if let Err(error) = app.session.open_single_file(&file) {
+                app.message = Some(error);
+            }
+        } else if let Some(root) = root {
             app.vault_input = root.to_string_lossy().into_owned();
             app.switch_vault(&cc.egui_ctx);
-            if let Some(file) = initial_file {
-                if let Some(name) = file.file_name() {
-                    if let Err(error) = app.session.open_file(Path::new(name)) {
-                        app.message = Some(error);
-                    }
-                }
-            }
         }
         app
     }
 
     fn switch_vault(&mut self, ctx: &egui::Context) {
-        let root = PathBuf::from(self.vault_input.trim());
+        let root = expand_user_path(PathBuf::from(self.vault_input.trim()));
         match self.session.open_vault(&root) {
             Ok(()) => {
+                self.light_mode = false;
                 let mut rescan_after_registration = false;
                 self.message = None;
                 self.settings.last_vault =
@@ -341,7 +375,11 @@ impl DiamondApp {
     fn choose_vault(&mut self, ctx: &egui::Context) {
         if self.portal_receiver.is_none() {
             self.portal_folder = true;
-            self.portal_receiver = Some(portal::choose(true, ctx.clone()));
+            self.portal_receiver = Some(portal::choose(
+                true,
+                self.settings.language.text("Открыть хранилище").into(),
+                ctx.clone(),
+            ));
         }
     }
 
@@ -394,10 +432,17 @@ impl DiamondApp {
                         .corner_radius(10)
                         .inner_margin(egui::Margin::same(10))
                         .show(ui, |ui| {
+                            ui.set_min_width((ui.available_width()).max(1.0));
                             ui.horizontal(|ui| {
                                 let label = path.file_name().unwrap_or_default().to_string_lossy();
+                                let width = (ui.available_width() - 40.0).max(1.0);
                                 if ui
-                                    .selectable_label(current.as_ref() == Some(path), label)
+                                    .add_sized(
+                                        [width, 32.0],
+                                        egui::Button::new(egui::RichText::new(label))
+                                            .selected(current.as_ref() == Some(path))
+                                            .truncate(),
+                                    )
                                     .clicked()
                                 {
                                     pick = Some(path.clone());
@@ -451,6 +496,10 @@ impl DiamondApp {
         if let Some(choice) = choice {
             self.portal_receiver = None;
             match choice {
+                portal::Choice::Folder(path) if self.plugin_install_folder => {
+                    self.plugin_install_folder = false;
+                    self.start_plugin_install(path.to_string_lossy().into_owned(), ctx);
+                }
                 portal::Choice::Folder(path) => {
                     self.vault_input = path.to_string_lossy().into_owned();
                     self.request_action(PendingAction::SwitchVault, ctx);
@@ -465,13 +514,37 @@ impl DiamondApp {
                         "File chooser unavailable: {error}. Enter a path manually.",
                         &[("error", error.to_string())],
                     ));
-                    if self.portal_folder {
+                    if self.plugin_install_folder {
+                        self.plugin_install_folder = false;
+                        self.panel = Panel::Plugins;
+                    } else if self.portal_folder {
                         self.open_dialog = true;
                     } else {
-                        self.plugin_manual = true;
                         self.panel = Panel::Plugins;
                     }
                 }
+            }
+        }
+        let installed =
+            self.plugin_install_receiver
+                .as_ref()
+                .and_then(|receiver| match receiver.try_recv() {
+                    Ok(result) => Some(result),
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        Some(Err("Plugin installer stopped".into()))
+                    }
+                    Err(mpsc::TryRecvError::Empty) => None,
+                });
+        if let Some(result) = installed {
+            self.plugin_install_receiver = None;
+            match result {
+                Ok(plugin) => {
+                    self.plugin_path = plugin.manifest.to_string_lossy().into_owned();
+                    self.installed_plugins.push(plugin);
+                    self.message =
+                        Some(tr("Plugin installed. Select it to review and launch.").into());
+                }
+                Err(error) => self.message = Some(error),
             }
         }
         let fonts = self
@@ -605,9 +678,31 @@ impl DiamondApp {
         }
         for event in events {
             match event {
-                PluginEvent::Ready(commands) => {
+                PluginEvent::Ready(commands, views) => {
                     self.plugin_commands = commands;
+                    self.plugin_views = views;
                     self.plugin_busy = false;
+                }
+                PluginEvent::Preview {
+                    document_id,
+                    frame,
+                    pages,
+                } => {
+                    self.plugin_busy = false;
+                    if let Some(preview) = &mut self.preview {
+                        let current = self
+                            .session
+                            .tabs
+                            .get(self.session.active)
+                            .map(|tab| tab.editor.revision_key());
+                        if preview.document_id == document_id
+                            && current.is_some_and(|key| {
+                                Some(key) == preview.sent && key.1 == frame.revision
+                            })
+                        {
+                            preview.receive(ctx, frame, pages);
+                        }
+                    }
                 }
                 PluginEvent::Output(output) => {
                     self.plugin_busy = false;
@@ -630,10 +725,14 @@ impl DiamondApp {
                     self.message = Some(error);
                     self.plugin_input = None;
                     self.plugin_commands.clear();
+                    self.plugin_views.clear();
+                    self.preview = None;
                 }
                 PluginEvent::Stopped => {
                     self.plugin_busy = false;
                     self.plugin_commands.clear();
+                    self.plugin_views.clear();
+                    self.preview = None;
                     self.plugin_worker = None;
                 }
             }
@@ -751,12 +850,13 @@ impl DiamondApp {
         let tr = |key| lang.text(key);
         let colors = theme::Palette::of(ctx);
         egui::TopBottomPanel::top("titlebar")
-            .exact_height(64.0)
+            .show_separator_line(false)
+            .exact_height((self.settings.ui_font_size.clamp(12.0, 24.0) * 3.4 + 16.0).max(64.0))
             .frame(
                 egui::Frame::new()
                     .fill(colors.panel)
                     .inner_margin(egui::Margin::symmetric(16, 10))
-                    .stroke(egui::Stroke::new(1.0, colors.border)),
+                    .stroke(egui::Stroke::NONE),
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
@@ -796,7 +896,9 @@ impl DiamondApp {
                             .session
                             .tabs
                             .get(self.session.active)
-                            .is_some_and(|tab| !tab.autosaves());
+                            .is_some_and(|tab| {
+                                !tab.autosaves() && tab.editor.mode() != EditorMode::Image
+                            });
                     if manual_save
                         && icons::label_button(ui, Icon::Save, tr("Сохранить"))
                             .on_hover_text("Ctrl+S")
@@ -805,6 +907,17 @@ impl DiamondApp {
                         self.save_active(ctx);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if icons::selectable_button(
+                            ui,
+                            Icon::ArrowLeft,
+                            self.settings.show_sidebar && !self.light_mode,
+                            tr("Toggle left sidebar"),
+                        )
+                        .clicked()
+                        {
+                            self.settings.show_sidebar = !self.settings.show_sidebar;
+                            self.persist_settings();
+                        }
                         if icons::selectable_button(
                             ui,
                             Icon::Sidebar,
@@ -832,7 +945,7 @@ impl DiamondApp {
         let tr = |key| lang.text(key);
         let colors = theme::Palette::of(ctx);
         egui::TopBottomPanel::bottom("status")
-            .exact_height(40.0)
+            .exact_height((self.settings.ui_font_size.clamp(12.0, 24.0) * 1.6 + 18.0).max(40.0))
             .frame(
                 egui::Frame::new()
                     .fill(colors.panel)
@@ -866,6 +979,8 @@ impl DiamondApp {
                         ui.label(
                             RichText::new(if tab.editor.mode() == EditorMode::Hex {
                                 "HEX"
+                            } else if tab.editor.mode() == EditorMode::Image {
+                                "IMAGE"
                             } else {
                                 "UTF-8"
                             })
@@ -882,20 +997,16 @@ impl DiamondApp {
                         } else {
                             (Icon::Check, tr("Сохранено"))
                         };
-                        draw_icon(
-                            ui,
-                            icon,
-                            16.0,
-                            if tab.autosave_error().is_some() {
-                                colors.text
-                            } else {
-                                colors.muted
-                            },
-                        );
+                        let color = if !tab.is_dirty() && tab.autosave_error().is_none() {
+                            Color32::from_rgb(190, 224, 112)
+                        } else {
+                            colors.muted
+                        };
+                        draw_icon(ui, icon, 16.0, color);
                         let response = ui.label(
                             RichText::new(status)
                                 .size(theme::ui_size(ui, 14.0))
-                                .color(colors.muted),
+                                .color(color),
                         );
                         if let Some(error) = tab.autosave_error() {
                             response.on_hover_text(error);
@@ -906,6 +1017,9 @@ impl DiamondApp {
     }
 
     fn rail(&mut self, ctx: &egui::Context) {
+        if self.light_mode {
+            return;
+        }
         let lang = self.settings.language;
         let tr = |key| lang.text(key);
         let colors = theme::Palette::of(ctx);
@@ -934,6 +1048,7 @@ impl DiamondApp {
                     {
                         self.panel = panel;
                         self.settings_dialog = false;
+                        self.settings.show_sidebar = true;
                     }
                     ui.add_space(8.0);
                 }
@@ -955,7 +1070,7 @@ impl DiamondApp {
     fn sidebar(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language;
         let tr = |key| lang.text(key);
-        if self.settings_dialog {
+        if self.settings_dialog || self.light_mode || !self.settings.show_sidebar {
             return;
         }
         let colors = theme::Palette::of(ctx);
@@ -1008,7 +1123,7 @@ impl DiamondApp {
             ui.label(RichText::new(tr("Откройте папку с заметками")).color(colors.muted));
             return;
         };
-        ui.horizontal(|ui| {
+        let root_drop = ui.horizontal(|ui| {
             draw_icon(ui, Icon::Folder, 18.0, colors.muted);
             ui.label(
                 RichText::new(
@@ -1056,6 +1171,10 @@ impl DiamondApp {
         let mut toggle = None;
         let mut delete = None;
         let mut rename = None;
+        let mut movement = None;
+        if let Some(payload) = root_drop.response.dnd_release_payload::<PathBuf>() {
+            movement = Some((payload.as_ref().clone(), PathBuf::new()));
+        }
         egui::ScrollArea::vertical()
             .id_salt("vault_files")
             .show(ui, |ui| {
@@ -1101,8 +1220,29 @@ impl DiamondApp {
                             open = Some(entry.path.clone());
                         }
                     }
+                    response.dnd_set_drag_payload(entry.path.clone());
+                    if entry.is_dir {
+                        if response.dnd_hover_payload::<PathBuf>().is_some() {
+                            ui.painter().rect_stroke(
+                                response.rect,
+                                8.0,
+                                egui::Stroke::new(1.5, colors.accent),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                        if let Some(payload) = response.dnd_release_payload::<PathBuf>() {
+                            movement = Some((payload.as_ref().clone(), entry.path.clone()));
+                        }
+                    }
                     response.context_menu(|ui| {
-                        if !entry.is_dir && ui.button(tr("Rename file")).clicked() {
+                        if ui
+                            .button(if entry.is_dir {
+                                tr("Rename folder")
+                            } else {
+                                tr("Rename file")
+                            })
+                            .clicked()
+                        {
                             rename = Some(entry.path.clone());
                             ui.close();
                         }
@@ -1134,6 +1274,20 @@ impl DiamondApp {
             self.rename_entry = Some(path);
             self.rename_focus = true;
             self.message = None;
+        }
+        if let Some((source, directory)) = movement {
+            if let Some(name) = source.file_name() {
+                let target = directory.join(name);
+                match self.session.move_entry(&source, &target) {
+                    Ok(()) => {
+                        if !directory.as_os_str().is_empty() {
+                            self.expanded_folders.insert(directory);
+                        }
+                        self.reindex(ui.ctx());
+                    }
+                    Err(error) => self.message = Some(error),
+                }
+            }
         }
         if delete.is_some() {
             self.delete_entry = delete;
@@ -1301,25 +1455,67 @@ impl DiamondApp {
                 .size(theme::ui_size(ui, 11.0)),
         );
         ui.add_space(12.0);
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut self.plugin_path)
+                .hint_text(tr("GitHub repository URL or plugin folder"))
+                .desired_width(f32::INFINITY),
+        );
+        let submit = (field.has_focus() || field.lost_focus())
+            && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        let available = self.plugin_install_receiver.is_none();
+        if ui
+            .add_enabled(available, egui::Button::new(tr("Install plugin")))
+            .clicked()
+            || submit && available
+        {
+            self.start_plugin_install(self.plugin_path.trim().into(), ui.ctx());
+        }
         if ui
             .add_enabled(
-                self.plugin_worker.is_none() && self.portal_receiver.is_none(),
-                egui::Button::new(tr("Выбрать плагин…")),
+                available && self.portal_receiver.is_none(),
+                egui::Button::new(tr("Choose plugin folder…")),
             )
             .clicked()
         {
-            self.portal_folder = false;
-            self.portal_receiver = Some(portal::choose(false, ui.ctx().clone()));
+            self.plugin_install_folder = true;
+            self.portal_folder = true;
+            self.portal_receiver = Some(portal::choose(
+                true,
+                tr("Choose plugin folder…").into(),
+                ui.ctx().clone(),
+            ));
         }
-        if self.plugin_manual {
-            ui.add(
-                egui::TextEdit::singleline(&mut self.plugin_path)
-                    .hint_text(tr("Путь к manifest.json")),
-            );
-            if ui.button(tr("Открыть манифест")).clicked() {
-                self.load_plugin_manifest();
+        if self.plugin_install_receiver.is_some() {
+            ui.spinner();
+        }
+        ui.add_space(12.0);
+        let mut selected = None;
+        for plugin in &self.installed_plugins {
+            if ui
+                .add_enabled(
+                    self.plugin_worker.is_none(),
+                    egui::Button::new(&plugin.name),
+                )
+                .clicked()
+            {
+                selected = Some(plugin.manifest.clone());
             }
         }
+        if let Some(path) = selected {
+            self.plugin_path = path.to_string_lossy().into_owned();
+            self.load_plugin_manifest();
+        }
+        ui.collapsing(tr("Open manifest directly"), |ui| {
+            if ui
+                .add_enabled(
+                    self.plugin_worker.is_none(),
+                    egui::Button::new(tr("Открыть манифест")),
+                )
+                .clicked()
+            {
+                self.load_plugin_manifest();
+            }
+        });
         if self.plugin_busy {
             ui.spinner();
         }
@@ -1348,6 +1544,47 @@ impl DiamondApp {
             if let Some(command) = invoke {
                 self.invoke_plugin(command);
             }
+            let mut selected_view = None;
+            for view in &self.plugin_views {
+                let available = self
+                    .session
+                    .tabs
+                    .get(self.session.active)
+                    .is_some_and(|tab| {
+                        tab.path
+                            .extension()
+                            .and_then(|extension| extension.to_str())
+                            .is_some_and(|extension| {
+                                view.extensions
+                                    .iter()
+                                    .any(|candidate| candidate.eq_ignore_ascii_case(extension))
+                            })
+                    });
+                if ui
+                    .add_enabled(
+                        available && !self.plugin_busy,
+                        egui::Button::new(&view.title),
+                    )
+                    .on_hover_text(view.extensions.join(", "))
+                    .clicked()
+                {
+                    selected_view = Some(view.clone());
+                }
+            }
+            if let Some(view) = selected_view {
+                if let Some(tab) = self.session.tabs.get_mut(self.session.active) {
+                    if view.editable {
+                        match tab.editor.set_mode(EditorMode::Source) {
+                            Ok(()) => tab.plugin_autosave = true,
+                            Err(error) => {
+                                self.message = Some(error.to_string());
+                                return;
+                            }
+                        }
+                    }
+                }
+                self.preview = Some(plugin_preview::Preview::new(view));
+            }
             if ui.button(tr("Остановить плагин")).clicked() {
                 if let Some(worker) = &self.plugin_worker {
                     let _ = worker.sender.send(PluginRequest::Stop);
@@ -1355,6 +1592,80 @@ impl DiamondApp {
                 self.plugin_commands.clear();
                 self.plugin_busy = true;
                 self.plugin_input = None;
+            }
+        }
+    }
+
+    fn start_plugin_install(&mut self, source: String, ctx: &egui::Context) {
+        if self.plugin_install_receiver.is_some() {
+            return;
+        }
+        let (sender, receiver) = mpsc::channel();
+        self.plugin_install_receiver = Some(receiver);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let result = diamond_plugin::install::install(&source, &plugin_directory());
+            let _ = sender.send(result);
+            ctx.request_repaint();
+        });
+    }
+
+    fn update_preview(&mut self, ctx: &egui::Context) {
+        let Some(preview) = &mut self.preview else {
+            return;
+        };
+        let Some(tab) = self
+            .session
+            .tabs
+            .get(self.session.active)
+            .filter(|tab| preview.accepts(&tab.path))
+        else {
+            return;
+        };
+        let key = tab.editor.revision_key();
+        if preview.observed != Some(key) {
+            preview.observed = Some(key);
+            preview.changed_at = Instant::now();
+        }
+        if preview.sent == Some(key) && preview.event.is_none() {
+            return;
+        }
+        if self.plugin_busy {
+            return;
+        }
+        let delay = Duration::from_millis(250);
+        if preview.sent.is_some() && preview.changed_at.elapsed() < delay {
+            ctx.request_repaint_after(delay.saturating_sub(preview.changed_at.elapsed()));
+            return;
+        }
+        let Some(vault) = &self.session.vault else {
+            return;
+        };
+        let text = if matches!(
+            tab.editor.mode(),
+            EditorMode::Source | EditorMode::Formatted
+        ) {
+            tab.editor.source_text()
+        } else {
+            None
+        };
+        let document = diamond_plugin::ViewDocument {
+            view: preview.view.id.clone(),
+            document_id: preview.document_id.clone(),
+            revision: key.1,
+            file_path: vault.root().join(&tab.path).to_string_lossy().into_owned(),
+            text,
+        };
+        if let Some(worker) = &self.plugin_worker {
+            match worker.sender.send(PluginRequest::Preview {
+                document,
+                event: preview.event.take(),
+            }) {
+                Ok(()) => {
+                    preview.sent = Some(key);
+                    self.plugin_busy = true;
+                }
+                Err(error) => self.message = Some(error.to_string()),
             }
         }
     }
@@ -1403,6 +1714,7 @@ impl DiamondApp {
         let tr = |key| lang.text(key);
         let colors = theme::Palette::of(ctx);
         if self.settings_dialog
+            || self.light_mode
             || !self.settings.show_inspector
             || ctx.available_rect().width() < 620.0
         {
@@ -1482,22 +1794,55 @@ impl DiamondApp {
                     if let Some(note) = index.note(&tab.path) {
                         ui.add_space(24.0);
                         section_title(ui, tr("Задачи"));
-                        let done = note.tasks.iter().filter(|task| task.checked).count();
+                        let tasks: Vec<_> = tab
+                            .editor
+                            .document()
+                            .filter(|_| tab.editor.mode() == EditorMode::Formatted)
+                            .map(|document| {
+                                document
+                                    .blocks()
+                                    .iter()
+                                    .filter_map(|block| {
+                                        if let diamond_document::BlockKind::Task(checked) =
+                                            block.kind
+                                        {
+                                            Some(checked)
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_else(|| {
+                                note.tasks.iter().map(|task| task.checked).collect()
+                            });
+                        let done = tasks.iter().filter(|checked| **checked).count();
                         ui.label(
                             RichText::new(lang.message(
                                 "{done} of {count} completed",
                                 &[
                                     ("done", done.to_string()),
-                                    ("count", note.tasks.len().to_string()),
+                                    ("count", tasks.len().to_string()),
                                 ],
                             ))
                             .size(theme::ui_size(ui, 14.0)),
                         );
-                        if !note.tasks.is_empty() {
+                        if !tasks.is_empty() {
+                            let target = done as f32 / tasks.len() as f32;
+                            let value = if self.settings.reduced_motion {
+                                target
+                            } else {
+                                ctx.animate_value_with_time(
+                                    egui::Id::new(("task-progress", &tab.path)),
+                                    target,
+                                    0.25,
+                                )
+                            };
                             ui.add_space(4.0);
                             ui.add(
-                                egui::ProgressBar::new(done as f32 / note.tasks.len() as f32)
-                                    .desired_height(6.0),
+                                egui::ProgressBar::new(value)
+                                    .fill(colors.accent)
+                                    .desired_height(8.0),
                             );
                         }
                         if !note.tags.is_empty() {
@@ -1563,11 +1908,18 @@ impl DiamondApp {
                                         let active =
                                             !self.settings_dialog && index == self.session.active;
                                         egui::Frame::new()
-                                            .fill(if active { colors.raised } else { colors.panel })
+                                            .fill(if active { colors.accent } else { colors.panel })
                                             .corner_radius(10)
                                             .inner_margin(egui::Margin::symmetric(8, 3))
                                             .show(ui, |ui| {
                                                 ui.horizontal(|ui| {
+                                                    if active {
+                                                        ui.visuals_mut()
+                                                            .widgets
+                                                            .inactive
+                                                            .fg_stroke
+                                                            .color = colors.background;
+                                                    }
                                                     draw_icon(
                                                         ui,
                                                         if tab.is_dirty() {
@@ -1577,7 +1929,7 @@ impl DiamondApp {
                                                         },
                                                         16.0,
                                                         if active {
-                                                            colors.text
+                                                            colors.background
                                                         } else {
                                                             colors.muted
                                                         },
@@ -1588,7 +1940,7 @@ impl DiamondApp {
                                                                 RichText::new(tab.title())
                                                                     .size(theme::ui_size(ui, 14.0))
                                                                     .color(if active {
-                                                                        colors.text
+                                                                        colors.background
                                                                     } else {
                                                                         colors.muted
                                                                     }),
@@ -1655,14 +2007,6 @@ impl DiamondApp {
                 if let Some(index) = close {
                     self.request_action(PendingAction::CloseTab(index), ctx);
                 }
-                if let Some(message) = &self.message {
-                    egui::Frame::new()
-                        .fill(ui.visuals().faint_bg_color)
-                        .inner_margin(egui::Margin::same(12))
-                        .show(ui, |ui| {
-                            ui.label(message);
-                        });
-                }
                 if self.settings_dialog {
                     egui::Frame::new()
                         .inner_margin(egui::Margin::same(24))
@@ -1697,7 +2041,36 @@ impl DiamondApp {
                 let mut composing = false;
                 if let Some(tab) = self.session.tabs.get_mut(active) {
                     let area = ui.available_rect_before_wrap();
-                    let width = (area.width() - 48.0).max(1.0).min(
+                    let preview_active = self
+                        .preview
+                        .as_ref()
+                        .is_some_and(|preview| preview.accepts(&tab.path));
+                    let preview_only = preview_active
+                        && self
+                            .preview
+                            .as_ref()
+                            .is_some_and(|preview| !preview.view.editable);
+                    let split = if preview_active && !preview_only {
+                        area.width() * 0.52
+                    } else {
+                        area.width()
+                    };
+                    let preview_rect = egui::Rect::from_min_max(
+                        egui::pos2(
+                            if preview_only {
+                                area.left()
+                            } else {
+                                area.left() + split + 8.0
+                            },
+                            area.top(),
+                        ),
+                        area.max,
+                    );
+                    let editor_area = egui::Rect::from_min_max(
+                        area.min,
+                        egui::pos2(area.left() + split, area.bottom()),
+                    );
+                    let width = (editor_area.width() - 48.0).max(1.0).min(
                         if tab.editor.mode() == EditorMode::Formatted {
                             self.settings.editor_width.clamp(480.0, 1600.0)
                         } else {
@@ -1705,44 +2078,72 @@ impl DiamondApp {
                         },
                     );
                     let rect = egui::Rect::from_center_size(
-                        area.center(),
-                        egui::vec2(width, area.height()),
+                        editor_area.center(),
+                        egui::vec2(width, editor_area.height()),
                     );
                     ui.allocate_rect(area, egui::Sense::hover());
-                    ui.scope_builder(
-                        egui::UiBuilder::new()
-                            .max_rect(rect)
-                            .layout(egui::Layout::top_down(egui::Align::Min)),
-                        |ui| {
-                            ui.set_min_height(rect.height());
-                            let family = if tab.editor.mode() != EditorMode::Formatted
-                                && self.settings.editor_font == "sans"
-                                && self.settings.editor_font_path.is_none()
-                            {
-                                egui::FontFamily::Monospace
-                            } else {
-                                theme::font_family(&self.settings)
-                            };
-                            tab.editor.set_language(self.settings.language);
-                            tab.editor.set_view_options(
-                                family,
-                                self.settings.word_wrap,
-                                self.settings.line_numbers,
-                            );
-                            let size = if tab.editor.mode() == EditorMode::Formatted {
-                                self.settings.editor_font_size
-                            } else {
-                                self.settings.code_font_size
-                            };
-                            let response = tab.editor.ui_with_options(ui, size);
-                            edited = response.changed;
-                            composing = response.composing;
-                            follow_link = response.open_link;
-                            if let Some(error) = response.error {
-                                self.message = Some(error);
+                    if !preview_only {
+                        ui.scope_builder(
+                            egui::UiBuilder::new()
+                                .max_rect(rect)
+                                .layout(egui::Layout::top_down(egui::Align::Min)),
+                            |ui| {
+                                ui.set_min_height(rect.height());
+                                let family = if tab.editor.mode() != EditorMode::Formatted
+                                    && self.settings.editor_font == "sans"
+                                    && self.settings.editor_font_path.is_none()
+                                {
+                                    egui::FontFamily::Monospace
+                                } else {
+                                    theme::font_family(&self.settings)
+                                };
+                                tab.editor.set_language(self.settings.language);
+                                tab.editor.set_view_options(
+                                    family,
+                                    self.settings.word_wrap,
+                                    self.settings.line_numbers,
+                                );
+                                let size = if tab.editor.mode() == EditorMode::Formatted {
+                                    self.settings.editor_font_size
+                                } else {
+                                    self.settings.code_font_size
+                                };
+                                let response = tab.editor.ui_with_options(ui, size);
+                                edited = response.changed;
+                                composing = response.composing;
+                                follow_link = response.open_link;
+                                if let Some(error) = response.error {
+                                    self.message = Some(error);
+                                }
+                            },
+                        );
+                    }
+                    if preview_active {
+                        let mut close = false;
+                        if let Some(preview) = &mut self.preview {
+                            let key = tab.editor.revision_key();
+                            let id = format!("{}:{}", key.0, tab.path.display());
+                            if preview.document_id != id {
+                                preview.clear_document(id);
                             }
-                        },
-                    );
+                            ui.scope_builder(egui::UiBuilder::new().max_rect(preview_rect), |ui| {
+                                ui.set_clip_rect(preview_rect.intersect(ui.clip_rect()));
+                                let result = preview.ui(
+                                    ui,
+                                    tab.editor.preview_offset(),
+                                    self.settings.language,
+                                );
+                                close = result.0;
+                                if let Some(offset) = result.1 {
+                                    tab.editor.jump_to_source(offset);
+                                }
+                            });
+                        }
+                        if close {
+                            self.preview = None;
+                            tab.plugin_autosave = false;
+                        }
+                    }
                 }
                 self.session
                     .set_composing(active, composing, Instant::now());
@@ -1867,7 +2268,10 @@ impl DiamondApp {
                     ui.label(tr(
                         "Имя файла относительно хранилища, например Notes/Идея.md:",
                     ));
-                    ui.add(egui::TextEdit::singleline(&mut self.note_input).desired_width(430.0));
+                    let field = ui
+                        .add(egui::TextEdit::singleline(&mut self.note_input).desired_width(430.0));
+                    submit |= (field.has_focus() || field.lost_focus())
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter));
                     if ui.button(tr("Создать")).clicked() {
                         submit = true;
                     }
@@ -1918,8 +2322,8 @@ impl DiamondApp {
             if let Some(error) = &self.message {
                 ui.label(error);
             }
-            confirm |=
-                response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            confirm |= (response.has_focus() || response.lost_focus())
+                && ui.input(|input| input.key_pressed(egui::Key::Enter));
             ui.horizontal(|ui| {
                 confirm |= ui.button(tr("Rename")).clicked();
                 cancel = ui.button(tr("Cancel")).clicked();
@@ -2197,6 +2601,15 @@ impl DiamondApp {
 }
 
 impl eframe::App for DiamondApp {
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        let value = if visuals.dark_mode {
+            17.0 / 255.0
+        } else {
+            250.0 / 255.0
+        };
+        [value, value, value, 1.0]
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let lang = self.settings.language;
         let tr = |key| lang.text(key);
@@ -2233,7 +2646,18 @@ impl eframe::App for DiamondApp {
             });
             return;
         }
+        let speed = self.settings.scroll_speed.clamp(0.25, 4.0);
+        ctx.input_mut(|input| {
+            input.smooth_scroll_delta *= speed;
+            input.raw_scroll_delta *= speed;
+        });
         self.shortcuts(ctx);
+        let background = theme::Palette::of(ctx).background;
+        let viewport = ctx
+            .input(|input| input.viewport().inner_rect)
+            .unwrap_or_else(|| ctx.available_rect());
+        ctx.layer_painter(egui::LayerId::background())
+            .rect_filled(viewport, 0.0, background);
         self.top_bar(ctx);
         self.status_bar(ctx);
         self.rail(ctx);
@@ -2241,6 +2665,36 @@ impl eframe::App for DiamondApp {
         self.inspector(ctx);
         self.editor_panel(ctx);
         self.dialogs(ctx);
+        self.update_preview(ctx);
+        if self.toast_seen != self.message {
+            self.toast_seen = self.message.clone();
+            self.toast_until = self
+                .message
+                .as_ref()
+                .map(|_| Instant::now() + Duration::from_secs(3));
+        }
+        if let Some(deadline) = self.toast_until {
+            if Instant::now() >= deadline {
+                self.message = None;
+                self.toast_seen = None;
+                self.toast_until = None;
+            } else {
+                if let Some(message) = &self.message {
+                    egui::Area::new(egui::Id::new("notification"))
+                        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-20.0, -56.0))
+                        .order(egui::Order::Foreground)
+                        .show(ctx, |ui| {
+                            egui::Frame::popup(ui.style())
+                                .inner_margin(egui::Margin::same(14))
+                                .show(ui, |ui| {
+                                    ui.set_max_width(420.0);
+                                    ui.label(message);
+                                });
+                        });
+                }
+                ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
+            }
+        }
         if let Some(delay) = self.session.next_autosave_in(Instant::now()) {
             ctx.request_repaint_after(delay);
         }
@@ -2302,8 +2756,14 @@ fn file_row(
     icon: Icon,
 ) -> egui::Response {
     let colors = theme::Palette::of(ui.ctx());
-    let sense = egui::Sense::click();
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), sense);
+    let sense = egui::Sense::click_and_drag();
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(
+            ui.available_width(),
+            (egui::TextStyle::Body.resolve(ui.style()).size + 14.0).max(34.0),
+        ),
+        sense,
+    );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::SelectableLabel, ui.is_enabled(), label)
     });
@@ -2333,14 +2793,45 @@ fn file_row(
         ui.painter(),
         icon_rect,
         icon,
-        if selected { colors.text } else { colors.muted },
+        if selected {
+            colors.background
+        } else {
+            colors.muted
+        },
     );
     ui.painter().with_clip_rect(rect).text(
         egui::pos2(x + 24.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
         egui::TextStyle::Body.resolve(ui.style()),
-        if directory { colors.muted } else { colors.text },
+        if selected {
+            colors.background
+        } else if directory {
+            colors.muted
+        } else {
+            colors.text
+        },
     );
     response
+}
+
+fn plugin_directory() -> PathBuf {
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_default()
+                .join(".local/share")
+        })
+        .join("diamond/plugins")
+}
+
+fn expand_user_path(path: PathBuf) -> PathBuf {
+    if let Ok(relative) = path.strip_prefix("~")
+        && let Some(home) = std::env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(relative);
+    }
+    path
 }

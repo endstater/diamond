@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Local SVG rasterization and per-context texture caching. No network loader.
 use egui::{Color32, Id, Painter, Rect, TextureHandle};
 

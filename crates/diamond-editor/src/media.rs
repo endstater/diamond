@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Native bounded image decoding. Files/network are supplied by the desktop host.
 use diamond_document::Image;
 use egui::{Color32, ColorImage, Rect, TextureHandle, Ui};
@@ -106,7 +107,10 @@ impl Images {
         self.slots.insert(target.into(), Slot::Loading(receiver));
         std::thread::spawn(move || {
             let _permit = Permit;
-            let result = loader(&target_owned).and_then(|bytes| decode(&bytes));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                loader(&target_owned).and_then(|bytes| decode(&bytes))
+            }))
+            .unwrap_or_else(|_| Err("Image decoder failed".into()));
             let _ = sender.send(result);
             drop(_permit);
             repaint.request_repaint();
@@ -151,11 +155,15 @@ impl Images {
                 );
             }
             status => {
-                ui.painter()
-                    .rect_filled(rect, 10.0, ui.visuals().faint_bg_color);
+                if matches!(status, Some(Slot::Error(_))) {
+                    unreadable(ui, rect, language);
+                } else {
+                    ui.painter()
+                        .rect_filled(rect, 10.0, ui.visuals().faint_bg_color);
+                }
                 let label = match status {
                     Some(Slot::Loading(_)) => language.text("Loading image…"),
-                    Some(Slot::Error(_)) => language.text("Image unavailable"),
+                    Some(Slot::Error(_)) => "",
                     _ => language.text("Load image"),
                 };
                 ui.painter().text(
@@ -178,9 +186,42 @@ impl Images {
         }
     }
 }
-fn decode(bytes: &[u8]) -> Result<ColorImage, String> {
+pub(crate) fn decode(bytes: &[u8]) -> Result<ColorImage, String> {
     if bytes.len() > MAX_BYTES {
         return Err("Image exceeds 16 MiB".into());
+    }
+    let svg = std::str::from_utf8(bytes).ok().is_some_and(|text| {
+        text.trim_start_matches('\u{feff}')
+            .trim_start()
+            .starts_with('<')
+    });
+    if svg {
+        let mut options = resvg::usvg::Options::default();
+        options.image_href_resolver.resolve_string = Box::new(|_, _| None);
+        options.image_href_resolver.resolve_data = Box::new(|_, _, _| None);
+        let tree =
+            resvg::usvg::Tree::from_data(bytes, &options).map_err(|error| error.to_string())?;
+        let size = tree.size();
+        if !size.width().is_finite()
+            || !size.height().is_finite()
+            || size.width() <= 0.0
+            || size.height() <= 0.0
+        {
+            return Err("Invalid SVG dimensions".into());
+        }
+        let scale = (1200.0 / size.width()).min(1200.0 / size.height()).min(1.0);
+        let w = ((size.width() * scale).ceil() as u32).clamp(1, 1200);
+        let h = ((size.height() * scale).ceil() as u32).clamp(1, 1200);
+        let mut pixels = resvg::tiny_skia::Pixmap::new(w, h).ok_or("Cannot allocate image")?;
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::from_scale(scale, scale),
+            &mut pixels.as_mut(),
+        );
+        return Ok(ColorImage::from_rgba_premultiplied(
+            [w as usize, h as usize],
+            pixels.data(),
+        ));
     }
     let mut reader = image::ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
@@ -205,5 +246,70 @@ mod tests {
     #[test]
     fn invalid_images_fail_without_lossy_text_conversion() {
         assert!(super::decode(b"not an image").is_err());
+    }
+}
+
+/// Bounded hatch geometry: never allocate according to the source image size.
+pub fn unreadable(ui: &Ui, rect: Rect, language: diamond_core::Language) {
+    let rect = Rect::from_center_size(
+        rect.center(),
+        egui::Vec2::splat(rect.width().min(rect.height()).min(320.0)),
+    );
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    painter.rect_filled(rect, 10.0, ui.visuals().faint_bg_color);
+    let mut x = rect.left() - rect.height();
+    while x < rect.right() {
+        painter.line_segment(
+            [
+                egui::pos2(x, rect.bottom()),
+                egui::pos2(x + rect.height(), rect.top()),
+            ],
+            egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+        );
+        x += 12.0;
+    }
+    let text = language.text("Image cannot be read");
+    let galley = painter.layout_no_wrap(
+        text.into(),
+        egui::TextStyle::Button.resolve(ui.style()),
+        ui.visuals().text_color(),
+    );
+    let label = Rect::from_center_size(rect.center(), galley.size() + egui::vec2(20.0, 16.0));
+    painter.rect_filled(label, 8.0, ui.visuals().extreme_bg_color);
+    painter.galley(
+        label.center() - galley.size() * 0.5,
+        galley,
+        ui.visuals().text_color(),
+    );
+}
+
+#[cfg(test)]
+mod svg_tests {
+    use super::decode;
+    #[test]
+    fn vector_paths_render_with_xml_bom_and_long_comments() {
+        let body = r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="12"><rect width="24" height="12" fill="#ff0000"/></svg>"##;
+        let documents = [
+            body.to_owned(),
+            format!("<?xml version=\"1.0\"?>\n{body}"),
+            format!("\u{feff}<!--{}-->\n{body}", "comment ".repeat(300)),
+        ];
+        for source in documents {
+            let image = decode(source.as_bytes()).unwrap();
+            assert_eq!(image.size, [24, 12]);
+            assert!(
+                image
+                    .pixels
+                    .iter()
+                    .any(|pixel| pixel.r() > 200 && pixel.a() == 255)
+            );
+        }
+    }
+    #[test]
+    fn vector_viewport_is_scaled_before_allocating_a_bitmap() {
+        let svg=br##"<svg xmlns="http://www.w3.org/2000/svg" width="10000" height="5000"><rect width="10000" height="5000" fill="#123456"/></svg>"##;
+        let image = decode(svg).unwrap();
+        assert_eq!(image.size, [1200, 600]);
+        assert!(decode(b"<svg broken").is_err());
     }
 }

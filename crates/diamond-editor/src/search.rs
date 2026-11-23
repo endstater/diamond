@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use diamond_core::search::{SearchOptions, SearchPattern};
 use std::ops::Range;
 

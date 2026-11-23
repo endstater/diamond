@@ -34,3 +34,19 @@ GFM tables render column padding/alignment and grid geometry in the continuous s
 0.6 adds Enter continuation in Live and .md Source, indentation/quote geometry, numbered footnote objects with Ctrl+click navigation, and cached native mathematical-LaTeX. The math renderer pins latex-rust 2.1.1 to preserve Rust 1.88 compatibility, uses only its embedded STIX font, disables its optional egui backend, and rasterizes path-only SVG through the existing resvg. Formula objects reserve actual native glyph width/line height; source appears on editing. Unsupported math shows an error object without changing the source. Cache: 24 entries, input at most 8192 bytes / 64 brace groups, bounded raster size.
 
 Code and footnote headings occupy explicit structural projection rows. Code frames start at their header, below a native gap, so they cannot extend into preceding paragraphs. Task hit rectangles remain registered even if the native editor changes reveal state between pointer press and release; controls request focus, use a pointing-hand cursor, and paint a larger solid checked circle with a contrasting tick. No repaint timer is introduced.
+
+0.7 adds an Image default mode and deferred HEX encoding; bounded decode errors
+draw a hatched native placeholder. Table cell menus perform document-owned source
+transactions; collapsed tables have independent horizontal scrolling and a source
+entry point on double-click. Formula reservations use measured glyph advances;
+array shorthand is normalized for rendering only. Syntect 5.3 uses Two-face's
+extended grammar set with the same fancy regex backend. Native color emoji use
+Swash and an optional system color font; source bytes/positions stay unchanged.
+Source/caret viewport offsets and bounded PNG decode are exported for the plugin
+host, without embedding compiler or filesystem policy into this crate.
+
+0.7.1 fixes view registration state ownership (`PluginHost.views`, not the
+commands-list DTO) and keeps commands replies compatible with v1. SVG previews
+accept UTF-8 BOM/comments/XML declarations and scale large vector viewports to
+a bounded 1200-pixel raster; raster input limits and disabled external SVG image
+resolvers remain unchanged. First-party licensing is GPL-3.0-only.

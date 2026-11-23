@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Shared bounded regex compilation; no UI or filesystem policy.
 use regex::{NoExpand, Regex, RegexBuilder};
 use std::ops::Range;

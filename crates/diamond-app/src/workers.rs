@@ -1,17 +1,27 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use std::sync::mpsc::{self, Receiver, Sender};
 
-use diamond_plugin::{PluginHost, PluginManifest, PluginOutput};
+use diamond_plugin::{PluginError, PluginHost, PluginManifest, PluginOutput};
 
 pub enum PluginRequest {
     Invoke {
         command: String,
         text: Option<String>,
     },
+    Preview {
+        document: diamond_plugin::ViewDocument,
+        event: Option<diamond_plugin::ViewEvent>,
+    },
     Stop,
 }
 
 pub enum PluginEvent {
-    Ready(Vec<(String, String)>),
+    Ready(Vec<(String, String)>, Vec<diamond_plugin::ViewDescriptor>),
+    Preview {
+        document_id: String,
+        frame: diamond_plugin::ViewFrame,
+        pages: Vec<egui::ColorImage>,
+    },
     Output(PluginOutput),
     Failed(String),
     Stopped,
@@ -45,12 +55,41 @@ impl PluginWorker {
                     .iter()
                     .map(|command| (command.id.clone(), command.title.clone()))
                     .collect(),
+                host.views().to_vec(),
             ));
             while let Ok(request) = requests.recv() {
                 match request {
                     PluginRequest::Invoke { command, text } => {
                         match host.invoke(&command, text.as_deref()) {
                             Ok(output) => notify(PluginEvent::Output(output)),
+                            Err(error) => {
+                                failure = Some(error.to_string());
+                                break;
+                            }
+                        }
+                    }
+                    PluginRequest::Preview { document, event } => {
+                        let document_id = document.document_id.clone();
+                        match host.update_view(document, event).and_then(|frame| {
+                            use base64::Engine;
+                            let pages = frame
+                                .pages
+                                .iter()
+                                .map(|page| {
+                                    let bytes = base64::engine::general_purpose::STANDARD
+                                        .decode(&page.png_base64)
+                                        .map_err(|error| error.to_string())?;
+                                    diamond_editor::decode_preview_png(&bytes)
+                                })
+                                .collect::<Result<Vec<_>, String>>()
+                                .map_err(PluginError::Protocol)?;
+                            Ok((frame, pages))
+                        }) {
+                            Ok((frame, pages)) => notify(PluginEvent::Preview {
+                                document_id,
+                                frame,
+                                pages,
+                            }),
                             Err(error) => {
                                 failure = Some(error.to_string());
                                 break;

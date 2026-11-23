@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! Structural table/image data. Their original bytes remain authoritative;
 //! edits use source transactions rather than a lossy Markdown reserializer.
 use crate::{Block, BlockKind, Link, Mark, MarkKind, ending, parser};

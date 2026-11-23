@@ -1,0 +1,14 @@
+Diamond
+Copyright (c) 2026 Diamond contributors
+
+Starting with version 0.7.1, the first-party Diamond project is distributed
+under the GNU General Public License, version 3 only (GPL-3.0-only).
+See LICENSE for the complete terms.
+
+Earlier releases were offered under MIT; their existing permissions are not
+revoked. The earlier notice is retained in LICENSES/Diamond-MIT-legacy.txt
+for attribution and historical coverage of previously distributed code.
+It does not grant an MIT license to new GPL-only changes.
+
+Third-party libraries, icons and fonts retain their own license notices.
+See THIRD_PARTY_LICENSES.md, assets/lucide/LICENSE and assets/licenses/.

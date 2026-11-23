@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
 """Example Diamond protocol v1 plugin; no packages or network access required."""
 
 import json

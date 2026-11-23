@@ -1,0 +1,8 @@
+{
+  "id": "diamond.example.native-preview",
+  "name": "Native split preview demo",
+  "protocol_version": 2,
+  "program": "python3",
+  "args": ["plugin.py"],
+  "capabilities": ["document_read", "document_views"]
+}

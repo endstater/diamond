@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
@@ -194,14 +195,27 @@ impl NoteMetadata {
                     line: index + 1,
                 });
             }
-            if let Some((checked, text)) = parse_task(trimmed) {
+            extract_inline_metadata(trimmed, &mut tags, &mut links);
+        }
+        let document = diamond_document::Document::parse(&note.text);
+        let map = document.source_map();
+        for (block, span) in document.blocks().iter().zip(&map.blocks) {
+            if let diamond_document::BlockKind::Task(checked) = block.kind {
+                let byte = note
+                    .text
+                    .char_indices()
+                    .nth(span.source_range.start)
+                    .map_or(note.text.len(), |(byte, _)| byte);
                 note.tasks.push(TaskMetadata {
-                    text: text.to_owned(),
+                    text: block.text.clone(),
                     checked,
-                    line: index + 1,
+                    line: note.text[..byte]
+                        .bytes()
+                        .filter(|byte| *byte == b'\n')
+                        .count()
+                        + 1,
                 });
             }
-            extract_inline_metadata(trimmed, &mut tags, &mut links);
         }
         if let Some(heading) = note
             .headings
@@ -224,35 +238,6 @@ fn strip_heading_closing(text: &str) -> &str {
     } else {
         text
     }
-}
-
-fn parse_task(line: &str) -> Option<(bool, &str)> {
-    let after_marker = if let Some(after) = line
-        .strip_prefix("- ")
-        .or_else(|| line.strip_prefix("* "))
-        .or_else(|| line.strip_prefix("+ "))
-    {
-        after.trim_start()
-    } else {
-        let digits = line.bytes().take_while(u8::is_ascii_digit).count();
-        if digits == 0 {
-            return None;
-        }
-        line[digits..]
-            .strip_prefix(". ")
-            .or_else(|| line[digits..].strip_prefix(") "))?
-            .trim_start()
-    };
-    let checked = match after_marker.get(..3)? {
-        "[ ]" => false,
-        "[x]" | "[X]" => true,
-        _ => return None,
-    };
-    let after = after_marker.get(3..)?;
-    if !after.is_empty() && !after.starts_with(char::is_whitespace) {
-        return None;
-    }
-    Some((checked, after.trim_start()))
 }
 
 fn extract_inline_metadata(line: &str, tags: &mut BTreeSet<String>, links: &mut BTreeSet<String>) {
@@ -368,5 +353,17 @@ mod tests {
         };
         assert_eq!(index.resolve_link(Path::new("origin.md"), "a"), None);
         assert!(index.backlinks(Path::new("one/a.md")).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod nested_task_tests {
+    use super::*;
+    #[test]
+    fn nested_tasks_count_but_fenced_code_tasks_do_not() {
+        let note=NoteMetadata::parse(PathBuf::from("tasks.md"),"- [ ] parent\n    - [x] child\n        - [ ] grandchild\n\n```text\n- [x] literal code\n```\n".into());
+        assert_eq!(note.tasks.len(), 3);
+        assert_eq!(note.tasks.iter().filter(|task| task.checked).count(), 1);
+        assert_eq!(note.tasks[2].line, 3);
     }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -10,6 +11,7 @@ pub struct Tab {
     pub path: PathBuf,
     pub loaded: Vec<u8>,
     pub editor: EditorBuffer,
+    pub plugin_autosave: bool,
     last_edit: Option<Instant>,
     autosave_error: Option<String>,
     composing: bool,
@@ -38,11 +40,12 @@ impl Tab {
     }
 
     pub fn autosaves(&self) -> bool {
-        self.editor.mode() == EditorMode::Formatted
+        (self.editor.mode() == EditorMode::Formatted
             && self
                 .path
                 .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md")))
+            || (self.plugin_autosave && self.editor.mode() == EditorMode::Source)
     }
 
     pub fn autosave_error(&self) -> Option<&str> {
@@ -72,6 +75,17 @@ pub struct Session {
 }
 
 impl Session {
+    /// A file argument opens no sibling tree, watcher, or vault index.
+    pub fn open_single_file(&mut self, path: &Path) -> Result<(), String> {
+        let path = path.canonicalize().map_err(|error| error.to_string())?;
+        let parent = path.parent().ok_or("File has no parent")?;
+        self.vault = Some(Vault::open(parent).map_err(|error| error.to_string())?);
+        self.entries.clear();
+        self.tabs.clear();
+        self.active = 0;
+        self.open_file(Path::new(path.file_name().ok_or("File has no name")?))
+    }
+
     pub fn open_vault(&mut self, root: &Path) -> Result<(), String> {
         let vault = Vault::open(root).map_err(|e| e.to_string())?;
         let entries = vault.entries().map_err(|e| e.to_string())?;
@@ -90,25 +104,42 @@ impl Session {
     }
 
     pub fn rename_file(&mut self, path: &Path, name: &Path) -> Result<(), String> {
-        let candidate = path.parent().unwrap_or(Path::new("")).join(name);
+        if name.components().count() != 1
+            || !matches!(
+                name.components().next(),
+                Some(std::path::Component::Normal(_))
+            )
+        {
+            return Err("Enter a filename without a path".into());
+        }
+        self.move_entry(path, &path.parent().unwrap_or(Path::new("")).join(name))
+    }
+
+    pub fn move_entry(&mut self, path: &Path, target: &Path) -> Result<(), String> {
         if self
             .tabs
             .iter()
-            .any(|tab| tab.path != path && tab.path == candidate)
+            .any(|tab| !tab.path.starts_with(path) && tab.path.starts_with(target))
         {
-            return Err("The target file is already open".into());
+            return Err("A destination file is already open".into());
         }
         self.deactivate_active(Instant::now());
-        let target = self
-            .vault
-            .as_ref()
-            .ok_or("Open a vault first")?
-            .rename_file(path, name)
+        let vault = self.vault.as_ref().ok_or("Open a vault first")?;
+        let target = vault
+            .move_entry(path, target)
             .map_err(|error| error.to_string())?;
         for tab in &mut self.tabs {
-            if tab.path == path {
-                tab.path = target.clone();
-                tab.editor.retarget_path(&target);
+            if let Ok(suffix) = tab.path.strip_prefix(path) {
+                tab.path = if suffix.as_os_str().is_empty() {
+                    target.clone()
+                } else {
+                    target.join(suffix)
+                };
+                tab.editor.retarget_path(&tab.path);
+                tab.editor.set_image_loader(crate::resources::image_loader(
+                    vault.clone(),
+                    tab.path.clone(),
+                ));
             }
         }
         self.refresh()
@@ -135,14 +166,28 @@ impl Session {
             return Ok(());
         }
         let vault = self.vault.as_ref().ok_or("Open a vault first")?;
-        let loaded = vault.read(path).map_err(|e| e.to_string())?;
+        let image = diamond_editor::is_image_path(path);
+        let result = if image {
+            vault.read_bounded(path, 16 * 1024 * 1024)
+        } else {
+            vault.read(path)
+        };
+        let (loaded, image_error) = match result {
+            Ok(bytes) => (bytes, None),
+            Err(error) if image => (Vec::new(), Some(error.to_string())),
+            Err(error) => return Err(error.to_string()),
+        };
         let mut editor = EditorBuffer::for_path(path, &loaded);
+        if let Some(error) = image_error {
+            editor.set_unreadable_image(error);
+        }
         editor.set_image_loader(crate::resources::image_loader(vault.clone(), path.into()));
         self.cancel_tab_composition(self.active, Instant::now());
         self.tabs.push(Tab {
             path: path.to_path_buf(),
             loaded,
             editor,
+            plugin_autosave: false,
             last_edit: None,
             autosave_error: None,
             composing: false,
@@ -631,5 +676,24 @@ mod tests {
         assert!(session.tabs[0].is_dirty());
         session.save(0).unwrap();
         assert!(!session.tabs[0].is_dirty());
+    }
+}
+
+#[cfg(test)]
+mod single_file_tests {
+    use super::*;
+    #[test]
+    fn single_file_does_not_enumerate_siblings_and_keeps_markdown_autosave() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("note.md"), b"# note\n").unwrap();
+        std::fs::write(directory.path().join("sibling.md"), b"not opened").unwrap();
+        let mut session = Session::default();
+        session
+            .open_single_file(&directory.path().join("note.md"))
+            .unwrap();
+        assert!(session.entries.is_empty());
+        assert_eq!(session.tabs.len(), 1);
+        assert!(session.tabs[0].autosaves());
+        assert_eq!(session.tabs[0].editor.bytes().unwrap(), b"# note\n");
     }
 }

@@ -8,9 +8,12 @@ license.workspace = true
 [dependencies]
 latex-rust.workspace = true
 syntect.workspace = true
+two-face.workspace = true
 image.workspace = true
 resvg.workspace = true
 diamond-core.workspace = true
 diamond-document = { path = "../diamond-document" }
 egui.workspace = true
 thiserror.workspace = true
+swash = "=0.2.6"
+unicode-segmentation = "=1.12.0"

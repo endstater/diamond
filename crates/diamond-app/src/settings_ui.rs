@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 use crate::theme::SystemFont;
 use diamond_core::{AppSettings, ThemeMode};
 
@@ -59,7 +60,7 @@ pub fn show(ui: &mut egui::Ui, settings: &mut AppSettings, fonts: &[SystemFont])
             ui.label(tr("Акцентный цвет"));
             ui.horizontal(|ui|{
                 changed|=ui.color_edit_button_srgb(&mut settings.accent).changed();
-                for color in [[224,224,224],[110,164,255],[166,132,245],[86,190,155],[231,172,90],[222,128,154]]{
+                for color in [[255,137,152],[255,166,109],[243,168,30],[190,224,112],[118,215,174],[123,178,255],[212,144,255]]{
                     let (rect,response)=ui.allocate_exact_size(egui::vec2(22.0,22.0),egui::Sense::click());
                     ui.painter().rect_filled(rect,7.0,egui::Color32::from_rgb(color[0],color[1],color[2]));
                     if response.clicked(){settings.accent=color;changed=true;}
@@ -84,6 +85,8 @@ pub fn show(ui: &mut egui::Ui, settings: &mut AppSettings, fonts: &[SystemFont])
             changed|=committed_slider(ui, "editor_font_size", &mut settings.editor_font_size, 12.0..=30.0);ui.end_row();
             ui.label(tr("Размер исходного кода"));
             changed|=committed_slider(ui, "code_font_size", &mut settings.code_font_size, 11.0..=26.0);ui.end_row();
+            ui.label(tr("Scroll speed"));
+            changed|=committed_slider(ui, "scroll_speed", &mut settings.scroll_speed, 0.25..=4.0);ui.end_row();
             ui.label(tr("Ширина заметки"));
             changed|=committed_slider(ui, "editor_width", &mut settings.editor_width, 640.0..=1200.0);ui.end_row();
         });
@@ -95,10 +98,12 @@ pub fn show(ui: &mut egui::Ui, settings: &mut AppSettings, fonts: &[SystemFont])
         ui.add_space(24.0);
         ui.label(tr("Markdown в режиме Live сохраняется автоматически. Поиск: Ctrl+F; поиск по хранилищу: Ctrl+Shift+F; Esc закрывает поиск."));
         ui.add_space(16.0);
-        ui.label(tr("Иконка: diamond2.svg рядом с Cargo.toml или исполняемым файлом. Приложение подхватит её при следующем запуске."));
+        ui.label(tr("Иконка: diamond.svg рядом с Cargo.toml или исполняемым файлом. Приложение подхватит её при следующем запуске."));
         ui.add_space(24.0);
         if ui.button(tr("Сбросить настройки внешнего вида")).clicked(){reset=true;}
-        ui.add_space(20.0);ui.small(format!("Diamond {} · Lucide Icons (ISC / MIT)",env!("CARGO_PKG_VERSION")));
+        ui.add_space(20.0);ui.small(format!("Diamond {} · GPL-3.0-only · Lucide Icons (ISC / MIT)",env!("CARGO_PKG_VERSION")));
+        ui.label(tr("Color emoji need a system color font, such as noto-fonts-emoji. Restart after installing fonts."));
+        ui.collapsing(tr("Syntax licenses"),|ui|{ui.label(diamond_editor::syntax_licenses());});
         ui.collapsing(tr("Лицензия иконок Lucide"),|ui|{
             ui.label(include_str!("../../../assets/lucide/LICENSE"));
         });
@@ -128,7 +133,13 @@ fn committed_slider(
         .ctx()
         .data_mut(|data| data.get_temp::<f32>(id))
         .unwrap_or(*value);
-    let response = ui.add(egui::Slider::new(&mut draft, range).suffix(" px"));
+    let response = ui.add(
+        egui::Slider::new(&mut draft, range).suffix(if key == "scroll_speed" {
+            " ×"
+        } else {
+            " px"
+        }),
+    );
     if response.dragged() || response.is_pointer_button_down_on() {
         ui.ctx().data_mut(|data| data.insert_temp(id, draft));
         false

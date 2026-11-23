@@ -48,3 +48,18 @@ Inline-ссылки и wikilinks имеют семантическую подп�
 Math: $inline$ и $$display$$, дроби, корни, степени/индексы, суммы и другие команды mathematical-LaTeX, поддерживаемые latex-rust 2.1.1; полная TeX-система и пакеты не запускаются. Сноски нумеруются по первому упоминанию, Ctrl+щелчок ведёт к определению; неопределённая ссылка сообщает об ошибке. Обычные многоабзацные определения поддерживаются.
 
 Code получает язык в отдельной строке и реальный отступ перед рамкой. Task-контролы увеличены, область нажатия сохраняется между press/release и reveal, cursor pointing hand, checked = solid circle + tick. Изменения требуют проверки на целевом desktop.
+
+## 0.7 source acceptance additions (native run pending)
+
+| Area | Implemented source | Still requires native validation / limits |
+| --- | --- | --- |
+| Plugins | V1 compatibility; V2 file views, split, diagnostics, revisions, page windows, source anchors | One active process/view; PDF/Typst engines and rich PDF selection/zoom are not included |
+| Installation | Prepared folder or public GitHub root; staged copy; no install/build hooks | Network git clone not exercised here; existing IDs are rejected |
+| Images | Image default, lazy HEX, bounded decoding, hatched unreadable placeholder | Test large/corrupt PNG/JPEG/SVG in desktop; 16 MiB read cap / 4096px decode cap |
+| Tables | Own horizontal scroll; insert/delete rows/columns, alignment, source entry, Undo | Verify pointer/context menu and narrow-window geometry; header/last column cannot be deleted |
+| Files | File/folder rename, no-replace drag move, buffer retarget | No cross-vault moves or automatic link rewriting; root label is the root drop target |
+| CLI | Folder vault vs single-file light session; --version/--help | Native argv launch and desktop association pending |
+| UI | Hide tree; equal vault widths; opaque header/background; solid pastel accents; lime Saved; timed toast; scroll factor | HiDPI/resizing/Hyprland appearance pending |
+| Fonts/emoji | Untruncated system font list; native color glyph overlays | Needs installed color font; no bundled font, unsupported clusters stay text; overlays cover editor/table text |
+| Markdown | Nested task progress/animation; array shorthand; measured math advance; post-code gap | Real GUI clipping/flow/selection pending |
+| Packaging | Local-checkout makepkg recipe, desktop file, icon, bundled grammar notices | No prebuilt package; makepkg and pacman not run here |

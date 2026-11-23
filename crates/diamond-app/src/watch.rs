@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-only
 //! OS notifications only: no PollWatcher, polling loop or periodic timer.
 use diamond_vault::VaultEntry;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};

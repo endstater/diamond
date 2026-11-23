@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
 """Smoke-test the bundled plugin using only Python's standard library.
 
 Run from any directory: python3 /path/to/diamond/scripts/check_plugin_example.py
