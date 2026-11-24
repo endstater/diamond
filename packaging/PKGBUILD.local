@@ -2,15 +2,17 @@
 # Run: cd packaging && makepkg -si -p PKGBUILD.local
 pkgname=diamond
 pkgver=0.7.5
-pkgrel=1
+pkgrel=3
 pkgdesc='Native Markdown workspace with process plugins and live editing'
 arch=('x86_64' 'aarch64')
 url='https://github.com/endstater/diamond'
 license=('GPL-3.0-only')
-depends=('gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxkbcommon' 'wayland' 'mesa' 'fontconfig')
-makedepends=('rust' 'cargo' 'pkgconf')
+depends=('gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxkbcommon' 'wayland' 'mesa' 'fontconfig' 'hicolor-icon-theme')
+makedepends=('rust' 'cargo' 'pkgconf' 'librsvg')
 optdepends=('git: install plugins from GitHub' 'python: Python plugins' 'xdg-desktop-portal: file and folder chooser' 'noto-fonts-cjk: Chinese text' 'noto-fonts-emoji: native color emoji' 'ttf-montserrat: Montserrat font')
-options=('!strip')
+# makepkg's C/C++ LTO flags break ring's native archive at Rust link time.
+# Cargo.toml retains the project's Rust ThinLTO setting.
+options=('!strip' '!lto')
 source=()
 sha256sums=()
 
@@ -26,8 +28,10 @@ package() {
     diamond_checkout="$(realpath "$startdir/..")"
     cd "$diamond_checkout"
     install -Dm755 target/release/diamond "$pkgdir/usr/bin/diamond"
-    install -Dm644 packaging/diamond.desktop "$pkgdir/usr/share/applications/diamond.desktop"
-    install -Dm644 assets/diamond.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/diamond.svg"
+    install -Dm644 packaging/diamond.desktop "$pkgdir/usr/share/applications/io.diamond.Diamond.desktop"
+    local diamond_icon=assets/diamond.svg
+    if [[ -f diamond.svg ]]; then diamond_icon=diamond.svg; fi
+    bash packaging/install-icons.sh "$pkgdir" "$diamond_icon"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
     target/release/diamond --syntax-licenses > "$pkgdir/usr/share/licenses/$pkgname/SYNTAXES.md"

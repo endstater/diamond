@@ -1,17 +1,19 @@
 # Local source package. Place diamond-0.7.5.tar.gz beside this PKGBUILD.
 pkgname=diamond
 pkgver=0.7.5
-pkgrel=1
+pkgrel=3
 pkgdesc='Native Markdown notes and source editor built with Rust and egui'
 arch=('x86_64')
 license=('GPL-3.0-only')
-depends=('gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxkbcommon' 'wayland' 'mesa')
-makedepends=('rust' 'cargo' 'pkgconf' 'python')
+depends=('gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxkbcommon' 'wayland' 'mesa' 'hicolor-icon-theme')
+makedepends=('rust' 'cargo' 'pkgconf' 'python' 'librsvg')
 optdepends=('xdg-desktop-portal: system file chooser' 'fontconfig: installed font selection' 'noto-fonts-cjk: Chinese glyphs' 'noto-fonts-emoji: color emoji' 'git: plugin installation from GitHub')
 source=("$pkgname-$pkgver.tar.gz")
 # This local archive is created by its owner, not downloaded from a release.
 # Replace SKIP with the result of updpkgsums when distributing the package.
 sha256sums=('SKIP')
+# Keep makepkg C/C++ LTO flags out of ring's native build; retain Cargo ThinLTO.
+options=('!lto')
 
 prepare() {
     cd "$srcdir/$pkgname-$pkgver"
@@ -39,12 +41,10 @@ check() {
 package() {
     cd "$srcdir/$pkgname-$pkgver"
     install -Dm755 target/release/diamond "$pkgdir/usr/bin/diamond"
-    install -Dm644 packaging/diamond.desktop "$pkgdir/usr/share/applications/diamond.desktop"
-    if [[ -f diamond.svg ]]; then
-        install -Dm644 diamond.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/diamond.svg"
-    else
-        install -Dm644 assets/diamond.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/diamond.svg"
-    fi
+    install -Dm644 packaging/diamond.desktop "$pkgdir/usr/share/applications/io.diamond.Diamond.desktop"
+    local diamond_icon=assets/diamond.svg
+    if [[ -f diamond.svg ]]; then diamond_icon=diamond.svg; fi
+    bash packaging/install-icons.sh "$pkgdir" "$diamond_icon"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
     target/release/diamond --syntax-licenses > "$pkgdir/usr/share/licenses/$pkgname/SYNTAXES.md"
