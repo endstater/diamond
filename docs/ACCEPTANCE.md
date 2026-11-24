@@ -63,3 +63,24 @@ Code получает язык в отдельной строке и реаль�
 | Fonts/emoji | Untruncated system font list; native color glyph overlays | Needs installed color font; no bundled font, unsupported clusters stay text; overlays cover editor/table text |
 | Markdown | Nested task progress/animation; array shorthand; measured math advance; post-code gap | Real GUI clipping/flow/selection pending |
 | Packaging | Local-checkout makepkg recipe, desktop file, icon, bundled grammar notices | No prebuilt package; makepkg and pacman not run here |
+
+
+## 0.7.4 additions (native runtime verification pending)
+
+| Area | Prepared behavior | Limitation |
+| --- | --- | --- |
+| YAML | Add/edit/delete properties in Live; ordinary Markdown frontmatter | Editing header can normalize YAML comments/formatting; 64 KiB limit |
+| Values | Text, number, ISO date, checkbox, string list | ISO date input; complex/custom YAML edited in Source |
+| Tags | YAML chips and inline Unicode/nested tags open search | Saved-note index; unsupported raw constructs stay source-visible |
+| Search | Exact tag plus descendants; case-insensitive | Separate regex mode retains ordinary text search |
+| CPU work | Reuse source galley, backlink indices and unchanged YAML | No incremental parser or native CPU benchmark here |
+
+
+## 0.7.5 properties (supersedes the 0.7.4 form)
+
+| Area | Prepared behavior | Verification |
+| --- | --- | --- |
+| Editing | Ordinary YAML source inside the caret block; no constructor/panel | Native interaction pending |
+| Inactive block | Cached property rows, wrapped clickable tag chips | Native appearance pending |
+| Preservation | No mapping serialization; source comments/CRLF/body retained | Rust regression tests added, unrun |
+| Navigation | Click block/keyboard entry reveals YAML; next line collapses it | Rust boundary tests added, unrun |

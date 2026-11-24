@@ -394,3 +394,11 @@ fn decode_entity(source: &str) -> Option<String> {
     }
     (decoded != source).then_some(decoded)
 }
+
+pub(super) fn tag_source_starts(source: &str, block: &Block) -> Vec<usize> {
+    let mapping = visible_mapping(source, block);
+    if mapping.text != block.text {
+        return Vec::new();
+    }
+    mapping.spans.iter().map(|span| span.start).collect()
+}

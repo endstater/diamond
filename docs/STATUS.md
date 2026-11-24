@@ -70,3 +70,33 @@ Fixes independent list parsing across blanks/incomplete lines, empty-line reveal
 ## 0.6.0 source update
 
 Adds nested container metadata/source maps, list/quote Enter continuation, mathematical-LaTeX objects, first-use numbered footnotes and in-document navigation, explicit code headings/gaps and stable larger task controls. GitHub source files were compared read-only against endstater/diamond at 1a495d05518e439f7df73a3d7609ad6b6f2c98ce. No remote writes, commits, PRs or pushes were performed. Delivery is a local update patch. Compilation and GUI runtime remain unverified here.
+
+
+## 0.7.3 source update
+
+Adds a 200 FPS frame-start ceiling without an idle timer; disables perpetual
+caret/loading animations, bounds task progress to a finite transition and
+compensates application deadline scheduling for egui's frame-time subtraction.
+Optional logs distinguish frames from layout passes and show repaint sources.
+Corrects source sharing types in vault metadata. Diamond licensing is described
+as GPL-3.0-only; third-party notices are retained. This revision has not been
+compiled or run on a native desktop here; CPU effects require user verification.
+
+
+## 0.7.4 source update
+
+Adds YAML property controls (text, number, ISO date, checkbox and string list),
+removable/searchable tag chips and accented normal-click inline tags. Values
+remain in Markdown with Undo/Redo and Live autosave. Saved YAML and inline tags
+share exact/hierarchical search. Adds retained source galleys, backlink snapshots
+and YAML-header reuse on body edits. Source-level verification only: compilation,
+native GUI tests and further CPU improvement remain unverified here.
+
+
+## 0.7.5 source update
+
+Replaces the property constructor with one caret-aware frontmatter object in the
+continuous Live editor. Original YAML is editable while the caret is inside;
+outside it renders property rows/tag chips. Comments and formatting stay intact.
+The constructor module and separate property mutation/serialization API are
+removed. Invalid YAML remains source-visible. Native tests/build remain unrun.

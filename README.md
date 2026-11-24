@@ -10,6 +10,8 @@ Inspired by the facets and perfection of a cut diamond, the project brings usefu
 
 ## Features
 
+- Caret-aware YAML properties: type source, render when the caret leaves.
+- Clickable Unicode tags with exact and nested-tag search.
 - Live Markdown with autosave, nested lists and tasks, quotes, tables, math and footnotes.
 - Wikilinks, backlinks, headings, and case-sensitive or regex search.
 - Native image previews, including SVG; source and hexadecimal editing.
@@ -47,8 +49,10 @@ diamond ~/notes/idea.md
 
 Color emoji need a system color font, such as `noto-fonts-emoji`.
 
+See [properties and tags](docs/PROPERTIES.md) for editing and search.
+
 Alpha software. See [validation](docs/VALIDATION.md) and the [plugin API](docs/PLUGINS.md). PDF/Typst engines are not bundled; one plugin process is active at a time.
 
 ## License
 
-[GNU GPL v3 only](LICENSE) (`GPL-3.0-only`). Third-party components retain their [own licenses](THIRD_PARTY_LICENSES.md). Earlier MIT releases keep their original terms; see [NOTICE](NOTICE).
+[GNU GPL v3 only](LICENSE) (`GPL-3.0-only`). Third-party components retain their [own licenses](THIRD_PARTY_LICENSES.md).

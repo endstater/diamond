@@ -63,6 +63,17 @@ impl VaultIndex {
     /// Case-insensitive AND search across paths, titles, tags and note source.
     /// Empty queries return all notes in deterministic vault order.
     pub fn search(&self, query: &str) -> Vec<&NoteMetadata> {
+        if let Some(tag) = diamond_document::tags::query(query) {
+            return self
+                .notes
+                .iter()
+                .filter(|note| {
+                    note.tags
+                        .iter()
+                        .any(|stored| diamond_document::tags::matches(stored, &tag))
+                })
+                .collect();
+        }
         let terms: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
         if terms.is_empty() {
             return self.notes.iter().collect();
@@ -89,13 +100,24 @@ impl VaultIndex {
 
     /// Return referring notes, resolving ambiguous bare stems only when unique.
     pub fn backlinks(&self, target: &Path) -> Vec<&NoteMetadata> {
+        self.backlink_indices(target)
+            .into_iter()
+            .map(|index| &self.notes[index])
+            .collect()
+    }
+
+    pub fn backlink_indices(&self, target: &Path) -> Vec<usize> {
         self.notes
             .iter()
-            .filter(|note| {
-                note.links.iter().any(|link| {
-                    self.resolve_link(&note.path, link)
-                        .is_some_and(|p| p == target)
-                })
+            .enumerate()
+            .filter_map(|(index, note)| {
+                note.links
+                    .iter()
+                    .any(|link| {
+                        self.resolve_link(&note.path, link)
+                            .is_some_and(|path| path == target)
+                    })
+                    .then_some(index)
             })
             .collect()
     }
@@ -165,7 +187,10 @@ impl NoteMetadata {
             text: text.into(),
         };
         let lines: Vec<&str> = note.text.lines().collect();
-        let frontmatter_end = if lines.first().is_some_and(|line| line.trim() == "---") {
+        let frontmatter_end = if lines
+            .first()
+            .is_some_and(|line| line.trim_start_matches('\u{feff}').trim() == "---")
+        {
             lines
                 .iter()
                 .enumerate()
@@ -216,9 +241,25 @@ impl NoteMetadata {
                     line: index + 1,
                 });
             }
-            extract_inline_metadata(trimmed, &mut tags, &mut links);
+            extract_inline_metadata(trimmed, &mut links);
         }
         let document = diamond_document::Document::parse(&note.text);
+        if let Some(header) = document
+            .frontmatter()
+            .filter(|header| header.error.is_none())
+        {
+            tags.extend(header.tags());
+        }
+        for block in document.blocks() {
+            for link in &block.links {
+                if let Some(tag) = link
+                    .target
+                    .strip_prefix(diamond_document::tags::LINK_PREFIX)
+                {
+                    tags.insert(tag.to_owned());
+                }
+            }
+        }
         let map = document.source_map_shared();
         for (block, span) in document.blocks().iter().zip(&map.blocks) {
             if let diamond_document::BlockKind::Task(checked) = block.kind {
@@ -261,9 +302,8 @@ fn strip_heading_closing(text: &str) -> &str {
     }
 }
 
-fn extract_inline_metadata(line: &str, tags: &mut BTreeSet<String>, links: &mut BTreeSet<String>) {
+fn extract_inline_metadata(line: &str, links: &mut BTreeSet<String>) {
     let mut offset = 0;
-    let mut previous: Option<char> = None;
     while offset < line.len() {
         let rest = &line[offset..];
         let character = rest.chars().next().expect("nonempty character boundary");
@@ -271,7 +311,6 @@ fn extract_inline_metadata(line: &str, tags: &mut BTreeSet<String>, links: &mut 
             offset += character.len_utf8();
             if let Some(escaped) = line[offset..].chars().next() {
                 offset += escaped.len_utf8();
-                previous = Some(escaped);
             }
             continue;
         }
@@ -280,11 +319,9 @@ fn extract_inline_metadata(line: &str, tags: &mut BTreeSet<String>, links: &mut 
             let closing = "`".repeat(count);
             if let Some(end) = rest[count..].find(&closing) {
                 offset += count + end + count;
-                previous = Some('`');
                 continue;
             }
             offset += count;
-            previous = Some('`');
             continue;
         }
         if rest.starts_with("[[")
@@ -299,29 +336,9 @@ fn extract_inline_metadata(line: &str, tags: &mut BTreeSet<String>, links: &mut 
                 links.insert(target.to_owned());
             }
             offset += 2 + end + 2;
-            previous = Some(']');
             continue;
         }
-        if character == '#'
-            && previous.is_none_or(|c| !c.is_alphanumeric() && !matches!(c, '_' | '/' | '#'))
-        {
-            let tag: String = rest[1..]
-                .chars()
-                .take_while(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '/'))
-                .collect();
-            if tag
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphabetic() || c == '_')
-            {
-                let tag = tag.trim_end_matches('/');
-                if !tag.is_empty() {
-                    tags.insert(tag.to_owned());
-                }
-            }
-        }
         offset += character.len_utf8();
-        previous = Some(character);
     }
 }
 
@@ -388,5 +405,26 @@ mod nested_task_tests {
         assert_eq!(note.tasks.len(), 3);
         assert_eq!(note.tasks.iter().filter(|task| task.checked).count(), 1);
         assert_eq!(note.tasks[2].line, 3);
+    }
+}
+
+#[cfg(test)]
+mod property_tag_tests {
+    use super::*;
+    #[test]
+    fn yaml_and_body_tags_share_one_exact_hierarchical_index() {
+        let first = NoteMetadata::parse(PathBuf::from("calculus.md"), "---\ntags: [Матан, двойной-интеграл]\nstatus: '#not-tag'\n---\n# Тело\n- #матан/идз\n\n| Тег |\n| --- |\n| #таблица |\n".into());
+        assert_eq!(
+            first.tags,
+            ["двойной-интеграл", "матан", "матан/идз", "таблица"]
+        );
+        let second = NoteMetadata::parse(PathBuf::from("other.md"), "#матанализ".into());
+        let index = VaultIndex {
+            notes: vec![first, second],
+            ..Default::default()
+        };
+        assert_eq!(index.search("tag:матан").len(), 1);
+        assert_eq!(index.search("#МАТАН").len(), 1);
+        assert!(index.search("tag:not-tag").is_empty());
     }
 }

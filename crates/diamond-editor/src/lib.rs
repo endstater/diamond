@@ -13,6 +13,7 @@ use thiserror::Error;
 mod emoji;
 mod live;
 mod math;
+mod property_block;
 mod syntax;
 pub use emoji::install_font as install_emoji_font;
 pub fn syntax_licenses() -> &'static str {
@@ -77,6 +78,7 @@ pub struct EditorResponse {
 pub struct EditorBuffer {
     images: media::Images,
     syntax_language: String,
+    source_layout: syntax::LayoutCache,
     language: diamond_core::Language,
     id: u64,
     mode: EditorMode,
@@ -169,6 +171,7 @@ impl EditorBuffer {
         Self {
             images: media::Images::default(),
             syntax_language: "txt".into(),
+            source_layout: Default::default(),
             language: diamond_core::Language::En,
             id: NEXT_EDITOR_ID.fetch_add(1, Ordering::Relaxed),
             mode: if decoded.is_some() {
@@ -703,7 +706,9 @@ impl EditorBuffer {
                     );
                     response.changed |= live_response.changed;
                     response.composing = live_response.composing;
-                    response.open_link = live_response.open_link;
+                    if live_response.open_link.is_some() {
+                        response.open_link = live_response.open_link;
+                    }
                     if let Some(error) = live_response.error {
                         self.record_error(error, &mut response);
                     }
@@ -735,29 +740,25 @@ impl EditorBuffer {
                             } else {
                                 None
                             };
+                            let cache = &mut self.source_layout;
+                            let syntax_language = &self.syntax_language;
+                            let wrap = self.word_wrap;
                             let mut layouter =
-                                |ui: &egui::Ui, buffer: &dyn TextBuffer, _width: f32| {
-                                    let mut job = syntax::layout(
-                                        ui.ctx(),
+                                |ui: &egui::Ui, buffer: &dyn TextBuffer, width: f32| {
+                                    cache.layout(
+                                        ui,
                                         buffer.as_str(),
-                                        &self.syntax_language,
-                                        font_size,
-                                        ui.visuals().dark_mode,
-                                    );
-                                    for section in &mut job.sections {
-                                        section.format.font_id.family = family.clone();
-                                    }
-                                    if self.word_wrap {
-                                        job.wrap.max_width = _width;
-                                    }
-                                    emoji::decorate_job(ui.ctx(), &mut job);
-                                    let job = search::highlight(
-                                        job,
-                                        &matches,
-                                        active_match.as_ref(),
-                                        accent,
-                                    );
-                                    ui.fonts_mut(|fonts| fonts.layout_job(job))
+                                        &syntax::LayoutOptions {
+                                            language: syntax_language,
+                                            size: font_size,
+                                            width,
+                                            wrap,
+                                            family: &family,
+                                            matches: &matches,
+                                            active: active_match.as_ref(),
+                                            accent,
+                                        },
+                                    )
                                 };
                             let output = egui::TextEdit::multiline(&mut self.source)
                                 .id(edit_id)

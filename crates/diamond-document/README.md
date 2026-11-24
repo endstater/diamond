@@ -35,3 +35,11 @@ API remains available. group_history_since combines already validated edits into
 one Undo step without serializing/diffing/reparsing the whole note again. Undo,
 Redo and actual commits invalidate derived mappings/progress; rejected/no-op edits
 do not. task_progress caches the nested task counts per current state.
+
+
+0.7.5 caches parsed YAML frontmatter metadata for the caret-aware property block.
+There is no separate mapping-edit/serialization API: editing uses normal lossless
+source transactions, preserving YAML comments and body bytes. The same parsed
+header is retained across body-only edits. Unicode hashtags become semantic links
+outside code, escapes and existing links; YAML tags and inline tags share exact
+and hierarchical search rules. See docs/PROPERTIES.md at the project root.

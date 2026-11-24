@@ -17,6 +17,8 @@ mod structures;
 mod table_edit;
 pub use table_edit::TableAction;
 mod containers;
+pub mod frontmatter;
+pub mod tags;
 pub use containers::Continuation;
 
 pub use source_map::{BlockSourceMap, SourceMap};
@@ -231,6 +233,7 @@ pub struct Document {
     revision: u64,
     cached_map: RefCell<Option<Arc<SourceMap>>>,
     cached_tasks: RefCell<Option<(usize, usize)>>,
+    cached_frontmatter: RefCell<Option<(u64, Option<Arc<frontmatter::Frontmatter>>)>>,
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -305,6 +308,7 @@ impl Document {
             revision: NEXT_REVISION.fetch_add(1, Ordering::Relaxed),
             cached_map: RefCell::new(None),
             cached_tasks: RefCell::new(None),
+            cached_frontmatter: RefCell::new(None),
         }
     }
 
@@ -874,6 +878,8 @@ fn parse_fragment(source: &str) -> Vec<Block> {
     } else {
         return vec![Block::raw(source)];
     }
+    let tag_links = tags::links(source, &block);
+    block.links.extend(tag_links);
     vec![block]
 }
 

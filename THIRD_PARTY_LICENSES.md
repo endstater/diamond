@@ -1,9 +1,7 @@
 # License scope
 
-First-party Diamond code is GPL-3.0-only starting with 0.7.1; see LICENSE and NOTICE.
-The change does not replace the original licenses of the dependencies, icons or
-fonts listed below. The earlier Diamond MIT notice is retained separately in
-LICENSES/Diamond-MIT-legacy.txt for previously released code.
+Diamond code is GPL-3.0-only; see LICENSE and NOTICE.
+Dependencies, icons and fonts retain their own licenses listed below.
 
 # Bundled icon assets
 
@@ -37,3 +35,9 @@ The project owner's supplied `diamond2.svg` is included unchanged at the root an
 Color emoji are rendered from a user's installed font; no emoji font or artwork
 is bundled in this snapshot. Noto Color Emoji is an optional system dependency
 under its own font license. The updated diamond.svg is supplied by the project owner.
+
+## 0.7.4 YAML properties
+
+- serde_yaml_ng 0.10.0 — MIT; https://github.com/acatton/serde-yaml-ng.
+  YAML is parsed as data; custom YAML tags do not execute code. The dependency's
+  own license and unsafe-libyaml dependency notices are supplied by Cargo.

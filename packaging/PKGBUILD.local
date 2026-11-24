@@ -1,7 +1,7 @@
 # Build an installable Arch package from the current checkout and its existing target cache.
 # Run: cd packaging && makepkg -si -p PKGBUILD.local
 pkgname=diamond
-pkgver=0.7.2
+pkgver=0.7.5
 pkgrel=1
 pkgdesc='Native Markdown workspace with process plugins and live editing'
 arch=('x86_64' 'aarch64')
@@ -30,7 +30,6 @@ package() {
     install -Dm644 assets/diamond.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/diamond.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
-    install -Dm644 LICENSES/Diamond-MIT-legacy.txt "$pkgdir/usr/share/licenses/$pkgname/Diamond-MIT-legacy.txt"
     target/release/diamond --syntax-licenses > "$pkgdir/usr/share/licenses/$pkgname/SYNTAXES.md"
     install -Dm644 THIRD_PARTY_LICENSES.md "$pkgdir/usr/share/doc/$pkgname/THIRD_PARTY_LICENSES.md"
     install -Dm644 assets/lucide/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LUCIDE"

@@ -1,6 +1,6 @@
-# Local source package. Place diamond-0.7.2.tar.gz beside this PKGBUILD.
+# Local source package. Place diamond-0.7.5.tar.gz beside this PKGBUILD.
 pkgname=diamond
-pkgver=0.7.2
+pkgver=0.7.5
 pkgrel=1
 pkgdesc='Native Markdown notes and source editor built with Rust and egui'
 arch=('x86_64')
@@ -47,7 +47,6 @@ package() {
     fi
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
-    install -Dm644 LICENSES/Diamond-MIT-legacy.txt "$pkgdir/usr/share/licenses/$pkgname/Diamond-MIT-legacy.txt"
     target/release/diamond --syntax-licenses > "$pkgdir/usr/share/licenses/$pkgname/SYNTAXES.md"
     install -Dm644 assets/lucide/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LUCIDE"
     install -Dm644 assets/licenses/LATEX-RUST-MIT.txt "$pkgdir/usr/share/licenses/$pkgname/LATEX-RUST-MIT"

@@ -217,3 +217,119 @@ mod extra_language_tests {
         }
     }
 }
+
+/// One retained source galley per editor; no token/job reconstruction on redraw.
+#[derive(Default)]
+pub(super) struct LayoutCache(Option<CachedLayout>);
+struct CachedLayout {
+    source: String,
+    style: LayoutStyle,
+    matches: Vec<Range<usize>>,
+    active: Option<Range<usize>>,
+    galley: Arc<egui::Galley>,
+}
+#[derive(PartialEq)]
+struct LayoutStyle {
+    font: egui::FontId,
+    language: String,
+    width: u32,
+    wrap: bool,
+    dark: bool,
+    accent: Color32,
+    epoch: u64,
+    scale: u32,
+}
+pub(super) struct LayoutOptions<'a> {
+    pub language: &'a str,
+    pub size: f32,
+    pub width: f32,
+    pub wrap: bool,
+    pub family: &'a egui::FontFamily,
+    pub matches: &'a [Range<usize>],
+    pub active: Option<&'a Range<usize>>,
+    pub accent: Color32,
+}
+impl LayoutCache {
+    pub fn layout(
+        &mut self,
+        ui: &egui::Ui,
+        text: &str,
+        options: &LayoutOptions<'_>,
+    ) -> Arc<egui::Galley> {
+        let style = LayoutStyle {
+            font: egui::FontId::new(options.size, options.family.clone()),
+            language: options.language.to_owned(),
+            width: if options.wrap {
+                options.width.to_bits()
+            } else {
+                0
+            },
+            wrap: options.wrap,
+            dark: ui.visuals().dark_mode,
+            accent: options.accent,
+            epoch: super::font_epoch(ui.ctx()),
+            scale: ui.ctx().pixels_per_point().to_bits(),
+        };
+        if let Some(hit) = self.0.as_ref().filter(|hit| {
+            hit.style == style
+                && hit.source == text
+                && hit.matches.as_slice() == options.matches
+                && hit.active.as_ref() == options.active
+        }) {
+            return Arc::clone(&hit.galley);
+        }
+        let mut job = layout(ui.ctx(), text, options.language, options.size, style.dark);
+        for section in &mut job.sections {
+            section.format.font_id.family = options.family.clone();
+        }
+        if options.wrap {
+            job.wrap.max_width = options.width;
+        }
+        super::emoji::decorate_job(ui.ctx(), &mut job);
+        let job = super::search::highlight(job, options.matches, options.active, options.accent);
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        // Large buffers retain the existing fallback, without another unbounded snapshot.
+        self.0 = (text.len() <= 2 * 1024 * 1024).then(|| CachedLayout {
+            source: text.to_owned(),
+            style,
+            matches: options.matches.to_vec(),
+            active: options.active.cloned(),
+            galley: Arc::clone(&galley),
+        });
+        galley
+    }
+}
+
+#[cfg(test)]
+mod layout_cache_tests {
+    use super::*;
+    #[test]
+    fn source_galley_is_shared_until_text_or_find_changes() {
+        let ctx = egui::Context::default();
+        let mut cache = LayoutCache::default();
+        let family = egui::FontFamily::Monospace;
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut options = LayoutOptions {
+                    language: "rs",
+                    size: 16.0,
+                    width: 500.0,
+                    wrap: true,
+                    family: &family,
+                    matches: &[],
+                    active: None,
+                    accent: Color32::LIGHT_BLUE,
+                };
+                let first = cache.layout(ui, "let x = 1;", &options);
+                let second = cache.layout(ui, "let x = 1;", &options);
+                assert!(Arc::ptr_eq(&first, &second));
+                let changed = cache.layout(ui, "let x = 2;", &options);
+                assert!(!Arc::ptr_eq(&first, &changed));
+                let search_matches = vec![4..5];
+                options.matches = &search_matches;
+                let found = cache.layout(ui, "let x = 2;", &options);
+                assert!(!Arc::ptr_eq(&changed, &found));
+            });
+        });
+    }
+}

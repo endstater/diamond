@@ -52,6 +52,8 @@ pub fn configure(ctx: &Context, settings: &AppSettings) {
         visuals.faint_bg_color = gray(30, 235);
         visuals.code_bg_color = gray(28, 232);
         visuals.override_text_color = None;
+        // A steady caret lets an idle editor sleep instead of waking to blink.
+        visuals.text_cursor.blink = false;
         visuals.weak_text_color = Some(gray(148, 100));
         visuals.selection.bg_fill = accent;
         visuals.selection.stroke = egui::Stroke::new(1.0, gray(17, 250));

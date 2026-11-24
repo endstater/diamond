@@ -64,3 +64,11 @@ braced array followed by a supported top-level relation is composed as centered
 boxes to avoid the engine's first-row array baseline. Ordinary formulas retain
 the single-render path; source bytes remain unchanged. Window focus is checked
 at both entry and exit before requesting a reveal redraw.
+
+
+0.7.5 renders YAML properties as a caret-aware block in the same document flow.
+The caret inside reveals original YAML; outside it shows cached rows and tag
+chips. Clicking the block reveals source, while tags navigate to search. There
+is no constructor, form or separate property panel. Rendering never rewrites
+YAML comments/formatting. Native source transactions retain editing/history and
+source-mode galley caching remains intact.

@@ -49,3 +49,17 @@ on drag start. The current vault index is shared with its worker; unchanged note
 text is reused between event-triggered index builds. Appearance accepts #RRGGBB,
 committed on Enter or focus loss; incomplete/invalid values leave the accent
 unchanged. See docs/PERFORMANCE.md for scope and runtime verification.
+
+
+0.7.3 limits requested native frame starts to 200/second via raw_input_hook,
+with a bounded remaining-frame sleep (at most 5 ms) and no idle tick. A steady
+caret and static loading markers let idle windows sleep; task progress animates
+only for 250 ms after a change. One-shot deadlines compensate for egui 0.33's
+predicted-frame subtraction. DIAMOND_PROFILE now includes actual GUI frame
+counts, focus/input counts and repaint sources, separately from layout passes.
+See docs/PERFORMANCE.md for scope and unverified native behavior.
+
+
+0.7.4 opens semantic tag links in vault search (`tag:name`) and caches backlink
+indices per index generation and active note. Saved YAML tags and body tags use
+one index, including nested tags. No additional repaint timer or worker is added.

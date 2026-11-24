@@ -14,6 +14,12 @@ pub enum Language {
 impl Language {
     pub fn text(self, key: &'static str) -> &'static str {
         let (en, ru, zh) = match key {
+            "Edit YAML: click" => (
+                "Click to edit YAML",
+                "Нажмите для редактирования YAML",
+                "点击编辑 YAML",
+            ),
+            "Search this tag" => ("Search this tag", "Поиск по этому тегу", "搜索此标签"),
             "Use a six-digit color, for example #7BB2FF" => (
                 "Use a six-digit color, for example #7BB2FF",
                 "Введите шесть HEX-цифр, например #7BB2FF",

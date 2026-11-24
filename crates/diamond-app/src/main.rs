@@ -3,6 +3,7 @@ mod icons;
 mod plugin_preview;
 mod portal;
 mod profile;
+mod repaint;
 mod resources;
 mod session;
 mod settings_ui;
@@ -50,7 +51,7 @@ fn main() -> eframe::Result {
     let override_ = std::env::var("DIAMOND_VSYNC").ok();
     let vsync = swap_vsync(wayland, override_.as_deref());
     eprintln!(
-        "[diamond {}] renderer=glow backend={} blocking_swap={}",
+        "[diamond {}] renderer=glow backend={} blocking_swap={} max_fps=200",
         env!("CARGO_PKG_VERSION"),
         if wayland { "wayland" } else { "x11-or-native" },
         vsync
@@ -164,6 +165,7 @@ struct Replacement {
 struct DiamondApp {
     session: Session,
     profile: Option<profile::FrameProfile>,
+    frame_pacer: repaint::FramePacer,
     settings: AppSettings,
     panel: Panel,
     message: Option<String>,
@@ -181,6 +183,7 @@ struct DiamondApp {
     rename_name: String,
     rename_focus: bool,
     vault_query: String,
+    backlink_cache: Option<(u64, PathBuf, Vec<usize>)>,
     palette: bool,
     palette_query: String,
     settings_dialog: bool,
@@ -239,6 +242,7 @@ impl DiamondApp {
         let mut app = Self {
             session: Session::default(),
             profile: profile::FrameProfile::from_env(),
+            frame_pacer: Default::default(),
             settings,
             panel: Panel::Files,
             message: message.or(font_error),
@@ -256,6 +260,7 @@ impl DiamondApp {
             rename_name: String::new(),
             rename_focus: false,
             vault_query: String::new(),
+            backlink_cache: None,
             palette: false,
             palette_query: String::new(),
             settings_dialog: false,
@@ -346,7 +351,7 @@ impl DiamondApp {
                     None
                 };
                 if rescan_after_registration {
-                    ctx.request_repaint_after(Duration::from_millis(80));
+                    repaint::after(ctx, Duration::from_millis(80));
                 }
                 self.index_receiver = None;
                 self.index_pending = false;
@@ -579,7 +584,7 @@ impl DiamondApp {
                 self.files_changed_at = None;
                 self.refresh_files(ctx);
             } else {
-                ctx.request_repaint_after(remaining);
+                repaint::after(ctx, remaining);
             }
         }
         if let Some(changed) = self.prefs_dirty_at {
@@ -589,7 +594,7 @@ impl DiamondApp {
                 self.prefs_dirty_at = None;
                 self.persist_settings();
             } else {
-                ctx.request_repaint_after(remaining);
+                repaint::after(ctx, remaining);
             }
         }
     }
@@ -605,7 +610,7 @@ impl DiamondApp {
                     // One follow-up snapshot after new watch registration, not
                     // a periodic poll; it closes the registration race.
                     self.files_changed_at = Some(Instant::now());
-                    ctx.request_repaint_after(Duration::from_millis(80));
+                    repaint::after(ctx, Duration::from_millis(80));
                 }
                 Ok(false) => {}
                 Err(error) => {
@@ -1355,19 +1360,30 @@ impl DiamondApp {
                 return;
             }
             if recompile || self.vault_search_generation != self.index_generation {
+                let tag_query = if self.vault_search_options.regex {
+                    None
+                } else {
+                    diamond_document::tags::query(&self.vault_query)
+                };
                 self.vault_search_results = index
                     .notes
                     .iter()
                     .enumerate()
                     .filter_map(|(index, note)| {
-                        (self.vault_query.is_empty()
-                            || pattern.is_some_and(|p| {
-                                p.as_ref().is_ok_and(|p| {
-                                    p.is_match(&note.text)
-                                        || p.is_match(&note.path.to_string_lossy())
+                        let matched = if let Some(tag) = &tag_query {
+                            note.tags
+                                .iter()
+                                .any(|stored| diamond_document::tags::matches(stored, tag))
+                        } else {
+                            self.vault_query.is_empty()
+                                || pattern.is_some_and(|p| {
+                                    p.as_ref().is_ok_and(|p| {
+                                        p.is_match(&note.text)
+                                            || p.is_match(&note.path.to_string_lossy())
+                                    })
                                 })
-                            }))
-                        .then_some(index)
+                        };
+                        matched.then_some(index)
                     })
                     .collect();
                 self.vault_search_generation = self.index_generation;
@@ -1641,7 +1657,7 @@ impl DiamondApp {
         }
         let delay = Duration::from_millis(250);
         if preview.sent.is_some() && preview.changed_at.elapsed() < delay {
-            ctx.request_repaint_after(delay.saturating_sub(preview.changed_at.elapsed()));
+            repaint::after(ctx, delay.saturating_sub(preview.changed_at.elapsed()));
             return;
         }
         let Some(vault) = &self.session.vault else {
@@ -1715,6 +1731,20 @@ impl DiamondApp {
         }
     }
 
+    fn open_tag_search(&mut self, tag: &str) {
+        let Some(tag) = diamond_document::tags::normalize(tag) else {
+            return;
+        };
+        self.vault_query = format!("tag:{tag}");
+        self.vault_search_options.regex = false;
+        self.vault_search_options.case_sensitive = false;
+        self.vault_search_cache = None;
+        self.panel = Panel::Search;
+        self.settings.show_sidebar = true;
+        self.settings_dialog = false;
+        self.focus_vault_search = true;
+    }
+
     fn inspector(&mut self, ctx: &egui::Context) {
         let lang = self.settings.language;
         let tr = |key| lang.text(key);
@@ -1726,6 +1756,7 @@ impl DiamondApp {
         {
             return;
         }
+        let mut tag_search = None;
         egui::SidePanel::right("inspector")
             .default_width(256.0)
             .width_range(210.0..=360.0)
@@ -1776,7 +1807,22 @@ impl DiamondApp {
                 section_title(ui, tr("Обратные ссылки"));
                 let mut open = None;
                 if let Some(index) = &self.index {
-                    let backlinks = index.backlinks(&tab.path);
+                    if self
+                        .backlink_cache
+                        .as_ref()
+                        .is_none_or(|cache| cache.0 != self.index_generation || cache.1 != tab.path)
+                    {
+                        self.backlink_cache = Some((
+                            self.index_generation,
+                            tab.path.clone(),
+                            index.backlink_indices(&tab.path),
+                        ));
+                    }
+                    let backlinks = &self
+                        .backlink_cache
+                        .as_ref()
+                        .expect("backlinks initialized")
+                        .2;
                     if backlinks.is_empty() {
                         ui.label(
                             RichText::new(tr("Пока нет ссылок"))
@@ -1784,7 +1830,10 @@ impl DiamondApp {
                                 .color(colors.muted),
                         );
                     }
-                    for note in backlinks {
+                    for backlink in backlinks {
+                        let Some(note) = index.notes.get(*backlink) else {
+                            continue;
+                        };
                         if ui
                             .add(
                                 egui::Button::new(
@@ -1820,17 +1869,12 @@ impl DiamondApp {
                         );
                         if total > 0 {
                             let target = done as f32 / total as f32;
-                            let value = if self.settings.reduced_motion
-                                || !ctx.input(|input| input.focused)
-                            {
-                                target
-                            } else {
-                                ctx.animate_value_with_time(
-                                    egui::Id::new(("task-progress", &tab.path)),
-                                    target,
-                                    0.25,
-                                )
-                            };
+                            let value = repaint::progress_value(
+                                ctx,
+                                egui::Id::new(("task-progress", &tab.path)),
+                                target,
+                                !self.settings.reduced_motion && ctx.input(|input| input.focused),
+                            );
                             ui.add_space(4.0);
                             ui.add(
                                 egui::ProgressBar::new(value)
@@ -1848,11 +1892,19 @@ impl DiamondApp {
                                         .corner_radius(8)
                                         .inner_margin(egui::Margin::symmetric(8, 4))
                                         .show(ui, |ui| {
-                                            ui.label(
-                                                RichText::new(tag)
-                                                    .size(theme::ui_size(ui, 12.0))
-                                                    .color(colors.muted),
-                                            );
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        RichText::new(tag)
+                                                            .size(theme::ui_size(ui, 12.0))
+                                                            .color(colors.accent),
+                                                    )
+                                                    .frame(false),
+                                                )
+                                                .clicked()
+                                            {
+                                                tag_search = Some(tag.clone());
+                                            }
                                         });
                                 }
                             });
@@ -1871,6 +1923,9 @@ impl DiamondApp {
                     }
                 }
             });
+        if let Some(tag) = tag_search {
+            self.open_tag_search(&tag);
+        }
     }
 
     fn editor_panel(&mut self, ctx: &egui::Context) {
@@ -2023,7 +2078,7 @@ impl DiamondApp {
                                 }
                                 self.prefs_dirty_at = Some(Instant::now());
                                 ctx.request_repaint();
-                                ctx.request_repaint_after(Duration::from_millis(400));
+                                repaint::after(ctx, Duration::from_millis(400));
                             }
                         });
                     return;
@@ -2144,7 +2199,9 @@ impl DiamondApp {
                     self.session.note_edited(active, Instant::now());
                 }
                 if let Some(target) = follow_link {
-                    if target.starts_with("https://") || target.starts_with("http://") {
+                    if let Some(tag) = target.strip_prefix(diamond_document::tags::LINK_PREFIX) {
+                        self.open_tag_search(tag);
+                    } else if target.starts_with("https://") || target.starts_with("http://") {
                         ctx.open_url(egui::OpenUrl::new_tab(target));
                     } else {
                         let path = self.session.tabs.get(active).and_then(|tab| {
@@ -2594,6 +2651,14 @@ impl DiamondApp {
 }
 
 impl eframe::App for DiamondApp {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // Called once per native frame, not once per egui layout pass.
+        self.frame_pacer.wait();
+        if let Some(profile) = &mut self.profile {
+            profile.begin_frame(ctx, raw_input);
+        }
+    }
+
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         let value = if visuals.dark_mode {
             17.0 / 255.0
@@ -2686,11 +2751,11 @@ impl eframe::App for DiamondApp {
                                 });
                         });
                 }
-                ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
+                repaint::after(ctx, deadline.saturating_duration_since(Instant::now()));
             }
         }
         if let Some(delay) = self.session.next_autosave_in(Instant::now()) {
-            ctx.request_repaint_after(delay);
+            repaint::after(ctx, delay);
         }
         if let (Some(profile), Some(start)) = (&mut self.profile, profile_start) {
             profile.record(start.elapsed());
@@ -2837,9 +2902,6 @@ fn expand_user_path(path: PathBuf) -> PathBuf {
 }
 
 fn quiet_spinner(ui: &mut egui::Ui) {
-    if ui.input(|input| input.focused) {
-        ui.spinner();
-    } else {
-        ui.label("…");
-    }
+    // Completion workers wake the window; a loading indicator needs no clock.
+    ui.label("…");
 }

@@ -180,6 +180,8 @@ struct ProjectedBlock {
     image: Option<diamond_document::Image>,
     image_height: f32,
     revealed: bool,
+    properties: Option<Arc<diamond_document::frontmatter::Frontmatter>>,
+    property_layout: super::property_block::RenderCache,
     before: Vec<usize>,
     after: Vec<usize>,
 }
@@ -207,12 +209,33 @@ impl Projection {
             to_source: vec![0],
             blocks: Vec::new(),
         };
+        let properties = document
+            .frontmatter()
+            .filter(|header| header.error.is_none());
         let mut consumed = 0;
         for (index, block_map) in map.blocks.iter().enumerate() {
             let Some(block) = document.blocks().get(index) else {
                 continue;
             };
-            let range = &block_map.source_range;
+            let properties = properties
+                .as_ref()
+                .filter(|header| {
+                    (block_map.source_range.start == header.source_range.start
+                        || (block_map.source_range.start == 0 && header.source_range.start == 1))
+                        && block.kind == BlockKind::Raw
+                        && block.text.trim_start_matches('\u{feff}').starts_with("---")
+                        && block_map.source_range.end >= header.source_range.end.saturating_sub(2)
+                        && (block_map.source_range.end <= header.source_range.end
+                            || chars[header.source_range.end..block_map.source_range.end]
+                                .iter()
+                                .all(|c| c.is_whitespace()))
+                })
+                .cloned();
+            let effective_range = properties.as_ref().map_or_else(
+                || block_map.source_range.clone(),
+                |header| header.source_range.clone(),
+            );
+            let range = &effective_range;
             result.append_source(&chars, consumed..range.start);
             let view_start = result.scalar_len();
             let mut header = None;
@@ -239,10 +262,14 @@ impl Projection {
             }
             let content_start = result.scalar_len();
             let content_byte_start = result.text.len();
-            let revealed = !block_map.is_exact
-                || block.kind == BlockKind::Raw
-                || reveal.is_some_and(|active| ranges_touch(active, range));
-            if !revealed && block.table.is_some() {
+            let revealed = if properties.is_some() {
+                reveal.is_some_and(|active| ranges_touch(active, range))
+            } else {
+                !block_map.is_exact
+                    || block.kind == BlockKind::Raw
+                    || reveal.is_some_and(|active| ranges_touch(active, range))
+            };
+            if !revealed && (block.table.is_some() || properties.is_some()) {
                 result.append_virtual(" \n", range.start);
                 if let Some(last) = result.to_source.last_mut() {
                     *last = range.end;
@@ -312,6 +339,8 @@ impl Projection {
                 image: block.image.clone(),
                 image_height: 88.0,
                 revealed,
+                properties,
+                property_layout: Default::default(),
                 before: block_map.semantic_to_source_before.clone(),
                 after: block_map.semantic_to_source_after.clone(),
             });
@@ -392,11 +421,15 @@ impl Projection {
             .blocks
             .iter()
             .map(|block| {
-                if block.kind == BlockKind::Code {
+                if block.kind == BlockKind::Code || (block.properties.is_some() && block.revealed) {
                     Some(super::syntax::spans(
                         ui.ctx(),
                         &block.text,
-                        &block.language,
+                        if block.properties.is_some() {
+                            "yaml"
+                        } else {
+                            &block.language
+                        },
                         options.dark,
                     ))
                 } else {
@@ -454,6 +487,10 @@ impl Projection {
                     }
                     _ => {}
                 }
+                if block.properties.is_some() && block.revealed {
+                    format.font_id = FontId::monospace(font_size * 0.94);
+                    format.background = ui.visuals().code_bg_color;
+                }
                 if !block.revealed {
                     if view == block.content_start {
                         leading_space += container_indent(block, font_size);
@@ -479,13 +516,17 @@ impl Projection {
                             }
                         }
                     }
-                    if block
+                    if let Some(link) = block
                         .links
                         .iter()
-                        .any(|link| link.range.contains(&position))
+                        .find(|link| link.range.contains(&position))
                     {
                         format.color = options.accent;
-                        format.underline = Stroke::new(1.0, options.accent.gamma_multiply(0.6));
+                        if link.target.starts_with(diamond_document::tags::LINK_PREFIX) {
+                            format.background = options.accent.gamma_multiply(0.14);
+                        } else {
+                            format.underline = Stroke::new(1.0, options.accent.gamma_multiply(0.6));
+                        }
                     }
                     for mark in &block.marks {
                         if mark.range.contains(&position) {
@@ -617,6 +658,23 @@ impl Projection {
                 format.extra_letter_spacing = 0.0;
                 format.line_height = Some(rows as f32 * font_size * 1.9 + 28.0);
             }
+            if let Some(block) = self.blocks.get(block_index).filter(|block| {
+                view == block.content_start && !block.revealed && block.properties.is_some()
+            }) {
+                let properties = block.properties.as_ref().expect("property block");
+                let layout = block.property_layout.layout(
+                    ui,
+                    properties,
+                    FontId::new(font_size, options.family.clone()),
+                    (width - 8.0).max(1.0),
+                );
+                format.font_id.size = 1.0;
+                format.color = Color32::TRANSPARENT;
+                format.background = Color32::TRANSPARENT;
+                format.line_height = Some(layout.height);
+                format.extra_letter_spacing = 0.0;
+                leading_space = 0.0;
+            }
             job.append(character.encode_utf8(&mut encoded), leading_space, format);
         }
         job
@@ -744,6 +802,18 @@ fn ranges_touch(active: &Range<usize>, block: &Range<usize>) -> bool {
 
 fn caret_block(document: &Document, source: usize) -> Option<Range<usize>> {
     let map = document.source_map_shared();
+    if let Some(header) = document
+        .frontmatter()
+        .filter(|header| header.error.is_none())
+    {
+        let end = header.source_range.end;
+        if source >= header.source_range.start
+            && (source < end
+                || (source == end && end == map.source_scalar_len && !map.source.ends_with('\n')))
+        {
+            return Some(header.source_range.clone());
+        }
+    }
     let index = map
         .blocks
         .partition_point(|block| block.source_range.start <= source)
@@ -1155,6 +1225,15 @@ pub(super) fn show(
                 &mut table_jump,
                 &mut response.open_link,
             );
+            paint_properties(
+                ui,
+                &output,
+                &projection.borrow(),
+                font_size,
+                options,
+                &mut table_jump,
+                &mut response.open_link,
+            );
             toggled = paint_decorations(
                 ui,
                 &output,
@@ -1194,11 +1273,16 @@ pub(super) fn show(
                             .iter()
                             .find(|link| link.range.contains(&position))
                     }) {
+                        let tag = link.target.starts_with(diamond_document::tags::LINK_PREFIX);
                         output
                             .response
                             .clone()
-                            .on_hover_text(options.language.text("Open link: Ctrl+click"));
-                        if ui.input(|input| input.modifiers.command) {
+                            .on_hover_text(options.language.text(if tag {
+                                "Search this tag"
+                            } else {
+                                "Open link: Ctrl+click"
+                            }));
+                        if tag || ui.input(|input| input.modifiers.command) {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                             if output.response.clicked() {
                                 response.open_link = Some(link.target.clone());
@@ -1375,7 +1459,7 @@ fn paint_structures(
                 block.content_end.saturating_sub(1).max(block.content_start),
             ))
             .translate(output.galley_pos.to_vec2());
-        if block.kind == BlockKind::Code {
+        if block.kind == BlockKind::Code || (block.properties.is_some() && block.revealed) {
             let start = output
                 .galley
                 .pos_from_cursor(CCursor::new(
@@ -1490,7 +1574,9 @@ fn paint_decorations(
     let mut toggled = None;
     let color = ui.visuals().weak_text_color();
     for block in &projection.blocks[visible_blocks(ui, output, projection)] {
-        if block.revealed && !matches!(block.kind, BlockKind::Task(_)) {
+        if block.properties.is_some()
+            || (block.revealed && !matches!(block.kind, BlockKind::Task(_)))
+        {
             continue;
         }
         let caret = output
@@ -2009,13 +2095,18 @@ fn paint_tables(
                                         }
                                     }
                                 }
-                                if block
+                                if let Some(link) = block
                                     .links
                                     .iter()
-                                    .any(|link| link.range.contains(&position))
+                                    .find(|link| link.range.contains(&position))
                                 {
                                     format.color = options.accent;
-                                    format.underline = Stroke::new(1.0, options.accent);
+                                    if link.target.starts_with(diamond_document::tags::LINK_PREFIX)
+                                    {
+                                        format.background = options.accent.gamma_multiply(0.14);
+                                    } else {
+                                        format.underline = Stroke::new(1.0, options.accent);
+                                    }
                                 }
                                 if let Some(math) = block
                                     .math
@@ -2101,14 +2192,23 @@ fn paint_tables(
                         if response.double_clicked() {
                             *jump = block.after.get(cell.range.start).copied();
                         }
-                        if response.clicked()
-                            && ui.input(|input| input.modifiers.command)
-                            && let Some(link) = block.links.iter().find(|link| {
-                                link.range.start < cell.range.end
-                                    && cell.range.start < link.range.end
-                            })
+                        if response.hovered()
+                            && let Some(pointer) = ui.input(|input| input.pointer.hover_pos())
                         {
-                            *open_link = Some(link.target.clone());
+                            let at =
+                                cell.range.start + galley.cursor_from_pos(pointer - position).index;
+                            if let Some(link) =
+                                block.links.iter().find(|link| link.range.contains(&at))
+                            {
+                                let tag =
+                                    link.target.starts_with(diamond_document::tags::LINK_PREFIX);
+                                if tag || ui.input(|input| input.modifiers.command) {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                    if response.clicked() {
+                                        *open_link = Some(link.target.clone());
+                                    }
+                                }
+                            }
                         }
                         response.context_menu(|ui| {
                             let tr = |key| options.language.text(key);
@@ -2275,6 +2375,110 @@ mod redraw_regressions {
                         > std::time::Duration::ZERO
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod property_projection_tests {
+    use super::*;
+    #[test]
+    fn yaml_renders_outside_the_caret_and_reveals_lossless_source_inside() {
+        let source = "---\n# comment\ntags: [матан]\nвариант: 19\n---\n\n# Заголовок\n\n#матан\n";
+        let document = Document::parse(source);
+        let header = document.frontmatter().unwrap();
+        let rendered = Projection::build(&document, None);
+        assert!(!rendered.text.contains("вариант:"));
+        assert!(rendered.text.contains("Заголовок"));
+        assert!(rendered.blocks[0].properties.is_some());
+        assert!(!rendered.blocks[0].revealed);
+        let revealed = Projection::build(&document, Some(&header.source_range));
+        assert!(revealed.text.contains("tags: [матан]"));
+        assert!(revealed.text.contains("# comment"));
+        assert!(revealed.blocks[0].revealed);
+        for projection in [&rendered, &revealed] {
+            assert!(
+                projection
+                    .to_source
+                    .windows(2)
+                    .all(|pair| pair[0] <= pair[1])
+            );
+            assert_eq!(
+                projection.to_source.last().copied(),
+                Some(source.chars().count())
+            );
+        }
+        assert_eq!(document.to_markdown(), source);
+    }
+    #[test]
+    fn closing_newline_is_the_property_reveal_boundary() {
+        let document = Document::parse("---\ntags: [math]\n---\n\nBody\n");
+        let end = document.frontmatter().unwrap().source_range.end;
+        assert_eq!(
+            caret_block(&document, end - 1),
+            Some(document.frontmatter().unwrap().source_range.clone())
+        );
+        assert!(caret_block(&document, end).is_none());
+    }
+    #[test]
+    fn malformed_yaml_remains_editable_source() {
+        let document = Document::parse("---\ntags: [\n---\nBody\n");
+        let projection = Projection::build(&document, None);
+        assert!(projection.text.contains("tags: ["));
+        assert!(
+            projection
+                .blocks
+                .iter()
+                .all(|block| block.properties.is_none())
+        );
+    }
+}
+
+fn paint_properties(
+    ui: &mut egui::Ui,
+    output: &egui::text_edit::TextEditOutput,
+    projection: &Projection,
+    size: f32,
+    options: &ViewOptions<'_>,
+    jump: &mut Option<usize>,
+    open_link: &mut Option<String>,
+) {
+    for block in &projection.blocks[visible_blocks(ui, output, projection)] {
+        let Some(properties) = block.properties.as_ref().filter(|_| !block.revealed) else {
+            continue;
+        };
+        let width = (output.response.rect.right() - output.galley_pos.x - 8.0).max(1.0);
+        // Reuse the layout that reserved native line height. TextEdit's outer
+        // rectangle includes margins, so recomputing at that width can wrap a
+        // tag row differently and overlap the following paragraph.
+        let layout = block.property_layout.cached().unwrap_or_else(|| {
+            block.property_layout.layout(
+                ui,
+                properties,
+                FontId::new(size, options.family.clone()),
+                width,
+            )
+        });
+        let caret = output
+            .galley
+            .pos_from_cursor(CCursor::new(block.content_start))
+            .translate(output.galley_pos.to_vec2());
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(output.galley_pos.x, caret.top()),
+            egui::vec2(width, layout.height),
+        );
+        let (edit, tag) = block.property_layout.paint(
+            ui,
+            rect,
+            &layout,
+            output.response.id.with(("properties", block.index)),
+            options.language,
+        );
+        if edit {
+            *jump = Some(properties.source_range.start);
+        }
+        if let Some(tag) = tag {
+            *open_link = Some(format!("{}{tag}", diamond_document::tags::LINK_PREFIX));
         }
     }
 }

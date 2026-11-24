@@ -62,3 +62,75 @@ driver work and the compositor. No fixed percentage improvement is claimed.
 
 Run `cargo fmt --all`, `cargo test --workspace` and
 `cargo clippy --workspace --all-targets -- -D warnings` on the target machine.
+
+## 0.7.3: frame ceiling and idle work
+
+The user's 0.7.2 trace reported 430–772 App::update calls/second with nonblocking
+Wayland swap. These calls are not necessarily presented frames: egui can perform
+multiple layout passes per frame. The trace does not identify a single cause
+of the continuous redraws. Native CPU measurements for this update are pending.
+
+- A frame pacer runs in eframe 0.33's raw_input_hook, once per native frame.
+  Requested frame starts are separated by at least 5 ms (200 FPS ceiling).
+  It sleeps only for the remaining portion of those 5 ms, without busy spinning,
+  periodic wakes or catch-up frames. It does not schedule a redraw. OS scheduling
+  can lower the rate. This is a small bounded GUI-thread wait, not a custom event
+  loop or a blocking Wayland buffer swap. Window events can wait up to 5 ms.
+- The caret is steady. Loading indicators are static; worker completion wakes
+  the GUI. These widgets no longer create an idle blink/spinner clock.
+- Task progress uses a finite 250 ms transition, scheduled about every 16 ms.
+  It returns the exact final value and stops requesting frames at the endpoint.
+  Unfocused/reduced-motion windows show the final value immediately.
+- egui 0.33 subtracts predicted_dt from delayed repaint requests. Application
+  one-shot deadlines now compensate for this subtraction to avoid premature
+  wakes repeatedly checking an autosave, preference-save, watcher debounce,
+  toast expiry or preview debounce deadline. This is not periodic polling.
+- Existing finite hover/scroll transitions and input/expose/worker/filesystem
+  events may still request frames. An idle editor has no intentional periodic
+  repaint. This needs confirmation on the user's Hyprland setup.
+
+The optional log now separates native `frames_per_sec` from layout
+`updates_per_sec`, counts focused frames and input/pointer events, and prints
+up to eight repaint source locations. Layout passes may exceed 200/second even
+when frame starts stay below 200/second. Frame counts are GUI frames, not a
+measurement of compositor presentation. Logs contain no note or typed text.
+No profiling work is enabled without DIAMOND_PROFILE=1.
+
+After building 0.7.3, compare focused idle, unfocused idle, typing and scrolling.
+If continuous updates remain, the `[diamond repaint]` lines help locate the
+remaining requester rather than guessing from CPU usage alone.
+
+
+## 0.7.4: work avoided on unchanged frames
+
+The user reports CPU usage fell to approximately 20% after 0.7.3. This is their
+measurement, not a locally reproduced benchmark; idle/action state was not
+specified. No further percentage reduction is claimed without a new trace.
+
+- Source mode now retains its native galley, skipping grammar/job construction,
+  emoji decoration and find highlighting on unchanged redraws. The cache checks
+  text and relevant layout/search/font/DPI/theme state; one additional source
+  snapshot is limited to 2 MiB per editor. Text comparison remains linear.
+- The inspector retains backlink indices for the active path/index generation.
+  It no longer scans/resolves every vault wikilink on each GUI frame.
+- YAML properties cache by document revision and retain the same parsed header
+  across body-only edits when its original bytes still match. YAML parsing does not happen per repaint. The 64 KiB header limit bounds editing work.
+- Tags are extracted during parsing/index updates, not by scanning source every
+  frame. Tag queries are normalized once per search recomputation. No new polling,
+  worker, animation clock or filesystem watcher is added.
+
+The 200 FPS ceiling remains. If 20% CPU occurs while idle, collect a fresh
+DIAMOND_PROFILE log including repaint sources; cache changes alone do not prove
+that all event/repaint loops have stopped. Large-file parsing, text comparison
+and initial full layout are still synchronous and not incremental.
+
+
+## 0.7.5: property block simplification
+
+Removed the property form and mapping-serialization mutation path. Property
+editing is the existing source-edit transaction flow, and comments are preserved.
+Inactive properties reserve one native object row; cached row/tag galleys render
+only when visible. Active YAML reuses the existing syntax cache. Layout and paint
+share the same reserved height even when text/tag rows wrap. No timer or worker
+was added. Source, backlink and YAML caches and the 200 FPS ceiling are retained.
+Native performance and interaction remain unverified in this environment.

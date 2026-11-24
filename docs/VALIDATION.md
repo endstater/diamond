@@ -169,8 +169,7 @@ as compiler, borrowing or native GUI validation.
 
 License change: root LICENSE is the verbatim GNU GPL v3 text, Cargo metadata and
 both Arch package recipes use GPL-3.0-only, and first-party source files carry
-SPDX notices. The earlier MIT text and attribution are kept separately; bundled
-third-party license files are unchanged. README is a short English overview with
+SPDX notices. Bundled third-party license files are unchanged. README is a short English overview with
 the owner's SVG, features, source launch and Arch installation commands.
 
 Preparation checks: TOML/JSON/Python/SVG structure, Rust lexical balance, shell
@@ -200,3 +199,64 @@ Preparation checks: source/TOML/JSON/Python/SVG structure, Rust lexical delimite
 balance, Python plugin subprocess fixtures, shell syntax and archive/update hash
 and backup/rollback verification. These cannot substitute for Rust type/borrow
 checking. The update includes the previous ashpd title type correction too.
+
+
+## 0.7.3 source update
+
+Added a 200 FPS ceiling in the native per-frame input hook, a steady caret,
+static completion indicators, finite task-progress transitions, compensated
+one-shot repaint deadlines and optional per-source repaint diagnostics.
+The 0.7.2 vault index field mismatch is corrected: HeadingMetadata.text remains
+String; NoteMetadata.text alone uses Arc<str>.
+
+Source and upstream eframe/egui 0.33.0 APIs were inspected. Regression tests were
+added for frame spacing and exact progress completion. Rust/Cargo is absent,
+including in the newly selected environment: compilation, cargo fmt, workspace
+tests, clippy, native GUI checks and CPU reduction remain unverified.
+The root LICENSES directory was removed; Diamond uses GPL-3.0-only and bundled
+third-party license notices remain intact.
+
+Preparation verification for 0.7.3: all 14 updater tests passed, including
+backup/rollback of removed notices, missing-file rollback, symlink rejection,
+repeat updates and preservation of target/.git/Cargo.lock. Structural checks,
+Rust token/delimiter checks and Arch recipe shell syntax passed. These checks
+are not a substitute for compilation or runtime profiling.
+
+
+## 0.7.4 source update
+
+Added Rust regression cases for YAML round trips/CRLF/BOM, property edits and
+Undo/Redo, malformed YAML rejection, complex-value retention, valid dates,
+header reuse across body edits, tag exclusions and hierarchy, combined YAML/body
+tag indexing, metadata projection/source anchors and retained source galleys.
+These Rust tests are not run: Rust/Cargo remains unavailable. The new YAML
+crate and eframe/egui APIs were checked against primary documentation/source,
+but the dependency graph has not been resolved or compiled here.
+
+Portable structure and Rust token/delimiter checks are run separately from native
+validation. GUI appearance/interaction and CPU impact need verification on the
+user's machine. The update retains the 200 FPS limit and previous compiler fixes.
+
+Preparation results: all 15 updater tests passed, including 0.7.3 upgrades,
+repeat installation, backup/rollback and cache/.git/lockfile preservation.
+Source/TOML/JSON/Python/SVG structure, Rust lexical/delimiter checks and shell
+syntax for the Arch recipes passed. These results do not establish Rust type
+correctness or native behavior.
+
+
+## 0.7.5 source update
+
+Removed the separate property form and its source mutation/serialization API.
+Added caret-aware source/render projection tests, closing-newline reveal-boundary
+checks, malformed YAML fallback and source-edit comment/CRLF/BOM/Undo tests.
+The source/frame/backlink caches and 200 FPS ceiling are retained.
+
+Rust/Cargo is unavailable. Compilation, workspace tests, formatting, clippy,
+real native keyboard/pointer interaction, rendering and CPU impact remain unrun.
+Portable source/token checks and updater tests are separate checks.
+
+Preparation checks for 0.7.5: 19 updater tests passed, including removal/backup
+of the previous form, constructor-symlink rejection and restoration after a final
+verification failure. Source structure, Rust token/delimiter checks and Arch
+recipe shell syntax passed. The archive payload is byte-checked against sources.
+These checks are not Rust compilation or native interaction verification.

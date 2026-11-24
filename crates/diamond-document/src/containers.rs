@@ -182,6 +182,8 @@ pub(crate) fn lines(source: &str, quoted: bool) -> Vec<Block> {
             ..Block::empty()
         };
         inline.apply(&mut block);
+        let tag_links = crate::tags::links(line, &block);
+        block.links.extend(tag_links);
         result.push(block);
     }
     result

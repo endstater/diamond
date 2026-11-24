@@ -172,3 +172,20 @@ change source semantics, byte positions, serialization or save conflict policy.
 The vault index worker receives a shared previous snapshot and reuses unchanged
 notes after identity/size/mtime/ctime checks; text is shared between snapshots.
 Changed notes are read/validated again. No filesystem polling loop is added.
+
+
+## YAML properties and tag links (0.7.5)
+
+The document model parses/caches YAML metadata with serde_yaml_ng 0.10.0.
+Metadata remains a lossless source block. Inactive frontmatter becomes a single
+source-anchored property object in the continuous editor projection; active
+frontmatter reveals original YAML with syntax highlighting. No separate form,
+editable shadow mapping, field commit action or YAML serializer is used to edit
+properties. The native source transaction path owns typing, selection, Undo/Redo
+and autosave. Invalid/unsupported headers remain editable source.
+
+Rendered rows and wrapped tag geometry are cached per projection/style. The same
+cached height reserves space in native layout and paints the object, preventing
+wrap discrepancies from overlapping the following paragraph. Clicking the block
+requests source focus; chips route semantic tag links to exact/hierarchical vault
+search. No YAML content is executed and no new polling clock is introduced.
