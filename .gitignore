@@ -1,0 +1,43 @@
+# Rust build output, including nested workspaces.
+target/
+**/target/
+/build/
+/dist/
+/out/
+/bin/
+/diamond
+
+# Compiled programs, libraries, objects and debug symbols.
+*.exe
+*.bin
+*.dll
+*.so
+*.so.*
+*.dylib
+*.a
+*.lib
+*.o
+*.obj
+*.rlib
+*.rmeta
+*.bc
+*.pdb
+*.dSYM/
+*.debug
+*.wasm
+*.class
+*.pyc
+*.pyo
+__pycache__/
+
+# Binary distribution packages; keep source archives and Cargo.lock.
+*.AppImage
+*.appimage
+*.deb
+*.rpm
+*.pkg.tar.*
+*.apk
+*.aab
+*.jar
+*.war
+*.ear
