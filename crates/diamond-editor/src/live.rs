@@ -179,6 +179,9 @@ struct ProjectedBlock {
     table_layout: RefCell<Option<(TableStyle, Rc<TableLayout>)>>,
     image: Option<diamond_document::Image>,
     image_height: f32,
+    diagram: bool,
+    diagram_key: u64,
+    diagram_height: f32,
     revealed: bool,
     properties: Option<Arc<diamond_document::frontmatter::Frontmatter>>,
     property_layout: super::property_block::RenderCache,
@@ -237,6 +240,13 @@ impl Projection {
             );
             let range = &effective_range;
             result.append_source(&chars, consumed..range.start);
+            let diagram = block.kind == BlockKind::Code
+                && block
+                    .language()
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|language| language.eq_ignore_ascii_case("mermaid"))
+                && !open_fence(&map.source[block_map.source_byte_range.clone()]);
             let view_start = result.scalar_len();
             let mut header = None;
             let mut gap = None;
@@ -269,7 +279,7 @@ impl Projection {
                     || block.kind == BlockKind::Raw
                     || reveal.is_some_and(|active| ranges_touch(active, range))
             };
-            if !revealed && (block.table.is_some() || properties.is_some()) {
+            if !revealed && (block.table.is_some() || properties.is_some() || diagram) {
                 result.append_virtual(" \n", range.start);
                 if let Some(last) = result.to_source.last_mut() {
                     *last = range.end;
@@ -338,6 +348,13 @@ impl Projection {
                 table_layout: RefCell::new(None),
                 image: block.image.clone(),
                 image_height: 88.0,
+                diagram,
+                diagram_key: if diagram {
+                    super::mermaid::key(&block.text)
+                } else {
+                    0
+                },
+                diagram_height: 120.0,
                 revealed,
                 properties,
                 property_layout: Default::default(),
@@ -348,6 +365,27 @@ impl Projection {
         }
         result.append_source(&chars, consumed..chars.len());
         result
+    }
+
+    fn inherit_geometry(&mut self, previous: &Projection) {
+        for block in &mut self.blocks {
+            if block.diagram && !block.revealed {
+                if let Some(old) = previous.blocks.iter().find(|old| {
+                    old.diagram && old.diagram_key == block.diagram_key && old.text == block.text
+                }) {
+                    block.diagram_height = old.diagram_height;
+                }
+            }
+            if let Some(image) = &block.image {
+                if let Some(old) = previous.blocks.iter().find(|old| {
+                    old.image
+                        .as_ref()
+                        .is_some_and(|old| old.target == image.target)
+                }) {
+                    block.image_height = old.image_height;
+                }
+            }
+        }
     }
 
     fn scalar_len(&self) -> usize {
@@ -421,7 +459,9 @@ impl Projection {
             .blocks
             .iter()
             .map(|block| {
-                if block.kind == BlockKind::Code || (block.properties.is_some() && block.revealed) {
+                if (block.kind == BlockKind::Code && (!block.diagram || block.revealed))
+                    || (block.properties.is_some() && block.revealed)
+                {
                     Some(super::syntax::spans(
                         ui.ctx(),
                         &block.text,
@@ -675,6 +715,18 @@ impl Projection {
                 format.extra_letter_spacing = 0.0;
                 leading_space = 0.0;
             }
+            if let Some(block) = self
+                .blocks
+                .get(block_index)
+                .filter(|block| view == block.content_start && !block.revealed && block.diagram)
+            {
+                format.font_id.size = 1.0;
+                format.color = Color32::TRANSPARENT;
+                format.background = Color32::TRANSPARENT;
+                format.extra_letter_spacing = 0.0;
+                format.line_height = Some(block.diagram_height);
+                leading_space = 0.0;
+            }
             job.append(character.encode_utf8(&mut encoded), leading_space, format);
         }
         job
@@ -899,17 +951,7 @@ impl LiveBuffer<'_> {
             }));
         }
         let mut next = Projection::build(self.document, self.reveal.as_ref());
-        for block in &mut next.blocks {
-            if let Some(image) = &block.image {
-                if let Some(previous) = self.projection.borrow().blocks.iter().find(|old| {
-                    old.image
-                        .as_ref()
-                        .is_some_and(|old| old.target == image.target)
-                }) {
-                    block.image_height = previous.image_height;
-                }
-            }
-        }
+        next.inherit_geometry(&self.projection.borrow());
         self.text.clone_from(&next.text);
         *self.projection.borrow_mut() = next;
         self.forced_selection = Some(SourceSelection {
@@ -954,6 +996,56 @@ impl TextBuffer for LiveBuffer<'_> {
         if self.error.is_some() {
             return;
         }
+        // A collapsed object stands for many source characters. A single
+        // Backspace/Delete at its edge reveals source; it must not expand one
+        // deleted display newline into deletion of the whole table/diagram.
+        if range.end.saturating_sub(range.start) == 1 {
+            let object = {
+                let projection = self.projection.borrow();
+                projection
+                    .blocks
+                    .iter()
+                    .find(|block| {
+                        !block.revealed
+                            && (block.table.is_some()
+                                || block.diagram
+                                || block.properties.is_some())
+                            && range.start < block.view_range.end
+                            && range.end > block.content_start
+                    })
+                    .map(|block| {
+                        (
+                            block.source_range.clone(),
+                            range.start == block.content_start,
+                        )
+                    })
+            };
+            if let Some((source_range, at_start)) = object {
+                let target = if at_start {
+                    source_range.start
+                } else {
+                    let source = self.document.source_map_shared();
+                    let end = source
+                        .source
+                        .char_indices()
+                        .nth(source_range.end)
+                        .map_or(source.source.len(), |(byte, _)| byte);
+                    let trimmed = source.source[..end].trim_end_matches(['\r', '\n']).len();
+                    source_range.end - source.source[trimmed..end].chars().count()
+                };
+                self.reveal = Some(source_range);
+                let mut next = Projection::build(self.document, self.reveal.as_ref());
+                next.inherit_geometry(&self.projection.borrow());
+                self.text.clone_from(&next.text);
+                *self.projection.borrow_mut() = next;
+                self.forced_selection = Some(SourceSelection {
+                    primary: target,
+                    secondary: target,
+                });
+                self.pending_insert = Some(target);
+                return;
+            }
+        }
         let source_range = {
             let projection = self.projection.borrow();
             if range.start == 0 && range.end == projection.scalar_len() {
@@ -984,12 +1076,13 @@ pub(super) fn show(
     images: &mut super::media::Images,
 ) -> LiveResponse {
     let mut response = LiveResponse::default();
-    let jump = state
-        .pending_jump
-        .take()
+    let pending_jump = state.pending_jump.take();
+    let jump = pending_jump
         .map(|source| source..source)
         .or_else(|| options.jump.clone());
-    if jump.is_some() {
+    // Search scrolls/selects a match while the query keeps keyboard focus.
+    // Direct clicks on diagram/table/property objects still activate editing.
+    if pending_jump.is_some() {
         ui.memory_mut(|memory| memory.request_focus(id));
     }
     if !state.composing
@@ -1079,6 +1172,20 @@ pub(super) fn show(
         let mut initial = projection.borrow_mut();
         let mut geometry_changed = false;
         for block in &mut initial.blocks {
+            if block.diagram && !block.revealed {
+                let height =
+                    super::mermaid::peek(ui.ctx(), block.diagram_key, &block.text, options.dark)
+                        .map_or(120.0, |diagram| {
+                            diagram
+                                .display_size((ui.available_width() - 48.0).max(1.0), font_size)
+                                .y
+                                + 12.0
+                        });
+                if height != block.diagram_height {
+                    block.diagram_height = height;
+                    geometry_changed = true;
+                }
+            }
             if let Some(image) = &block.image {
                 let height = images.height(&image.target, (ui.available_width() - 28.0).max(1.0));
                 if height != block.image_height {
@@ -1234,6 +1341,14 @@ pub(super) fn show(
                 &mut table_jump,
                 &mut response.open_link,
             );
+            paint_diagrams(
+                ui,
+                &output,
+                &projection.borrow(),
+                font_size,
+                options,
+                &mut table_jump,
+            );
             toggled = paint_decorations(
                 ui,
                 &output,
@@ -1366,7 +1481,9 @@ pub(super) fn show(
     }
     // Force source-anchored selection after each transaction. In particular a
     // revealed prefix must never move the caret by the hidden marker count.
-    if !state.composing && (adapter.changed || response.changed) {
+    if !state.composing
+        && (adapter.changed || response.changed || adapter.forced_selection.is_some())
+    {
         let current = if projection.borrow().revision == adapter.document.revision() {
             Rc::clone(&projection)
         } else {
@@ -1459,7 +1576,9 @@ fn paint_structures(
                 block.content_end.saturating_sub(1).max(block.content_start),
             ))
             .translate(output.galley_pos.to_vec2());
-        if block.kind == BlockKind::Code || (block.properties.is_some() && block.revealed) {
+        if (block.kind == BlockKind::Code && (!block.diagram || block.revealed))
+            || (block.properties.is_some() && block.revealed)
+        {
             let start = output
                 .galley
                 .pos_from_cursor(CCursor::new(
@@ -1723,6 +1842,118 @@ mod tests {
             changed: false,
             checkpoint: None,
         }
+    }
+
+    #[test]
+    fn edits_after_mermaid_keep_the_measured_object_height_in_the_same_pass() {
+        let source = "```mermaid\nflowchart LR\nA --> B\n```\n\ntail\n";
+        let mut document = Document::parse(source);
+        let mut editor = buffer(&mut document, None);
+        editor
+            .projection
+            .borrow_mut()
+            .blocks
+            .iter_mut()
+            .find(|b| b.diagram)
+            .unwrap()
+            .diagram_height = 417.0;
+        for text in ["x", "\n", "another\n"] {
+            let end = editor.text.chars().count();
+            editor.insert_text(text, end);
+            assert_eq!(
+                editor
+                    .projection
+                    .borrow()
+                    .blocks
+                    .iter()
+                    .find(|b| b.diagram)
+                    .unwrap()
+                    .diagram_height,
+                417.0
+            );
+        }
+        let end = editor.text.chars().count();
+        editor.delete_char_range(end - 1..end);
+        assert_eq!(
+            editor
+                .projection
+                .borrow()
+                .blocks
+                .iter()
+                .find(|b| b.diagram)
+                .unwrap()
+                .diagram_height,
+            417.0
+        );
+        assert!(
+            editor
+                .document
+                .to_markdown()
+                .contains("flowchart LR\nA --> B")
+        );
+    }
+
+    #[test]
+    fn backspace_at_collapsed_table_reveals_source_without_deleting_the_table() {
+        for eol in ["\n", "\r\n"] {
+            let source = "Before\n\n| Имя | Value |\n| --- | --- |\n| 你好 | 1 |\n\nAfter\n"
+                .replace('\n', eol);
+            let mut document = Document::parse(&source);
+            let mut editor = buffer(&mut document, None);
+            let end = editor
+                .projection
+                .borrow()
+                .blocks
+                .iter()
+                .find(|b| b.table.is_some())
+                .unwrap()
+                .view_range
+                .end;
+            editor.delete_char_range(end - 1..end);
+            assert_eq!(editor.document.to_markdown(), source);
+            assert!(!editor.changed);
+            assert!(editor.checkpoint.is_none());
+            assert!(
+                editor
+                    .projection
+                    .borrow()
+                    .blocks
+                    .iter()
+                    .find(|b| b.table.is_some())
+                    .unwrap()
+                    .revealed
+            );
+            let target = editor.forced_selection.unwrap().primary;
+            let view = editor.projection.borrow().view_at(target);
+            editor.delete_char_range(view - 1..view);
+            assert_eq!(
+                editor.document.to_markdown().chars().count(),
+                source.chars().count() - 1
+            );
+            assert!(editor.document.undo());
+            assert_eq!(editor.document.to_markdown(), source);
+        }
+    }
+
+    #[test]
+    fn explicitly_selected_table_can_still_be_deleted() {
+        let source = "Before\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nAfter\n";
+        let mut document = Document::parse(source);
+        let mut editor = buffer(&mut document, None);
+        let range = editor
+            .projection
+            .borrow()
+            .blocks
+            .iter()
+            .find(|b| b.table.is_some())
+            .unwrap()
+            .view_range
+            .clone();
+        editor.delete_char_range(range);
+        assert!(editor.changed);
+        assert!(!editor.document.to_markdown().contains("| 1 | 2 |"));
+        assert!(editor.document.undo());
+        assert_eq!(editor.document.to_markdown(), source);
     }
 
     #[test]
@@ -2479,6 +2710,122 @@ fn paint_properties(
         }
         if let Some(tag) = tag {
             *open_link = Some(format!("{}{tag}", diamond_document::tags::LINK_PREFIX));
+        }
+    }
+}
+
+fn paint_diagrams(
+    ui: &mut egui::Ui,
+    output: &egui::text_edit::TextEditOutput,
+    projection: &Projection,
+    size: f32,
+    options: &ViewOptions<'_>,
+    jump: &mut Option<usize>,
+) {
+    for block in &projection.blocks[visible_blocks(ui, output, projection)] {
+        if !block.diagram || block.revealed {
+            continue;
+        }
+        let caret = output
+            .galley
+            .pos_from_cursor(CCursor::new(block.content_start))
+            .translate(output.galley_pos.to_vec2());
+        let width = (output.response.rect.right() - output.galley_pos.x - 8.0).max(1.0);
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(output.galley_pos.x, caret.top()),
+            egui::vec2(width, block.diagram_height),
+        );
+        if !ui.is_rect_visible(rect) {
+            continue;
+        }
+        let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+        let diagram =
+            super::mermaid::request(ui.ctx(), block.diagram_key, &block.text, options.dark);
+        if let Some(diagram) = diagram {
+            if let Some(texture) = &diagram.texture {
+                let dimensions = diagram.display_size(width, size);
+                let image = egui::Rect::from_center_size(rect.center(), dimensions);
+                painter.image(
+                    texture.id(),
+                    image,
+                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            } else if let Some(error) = &diagram.error {
+                painter.text(
+                    rect.left_center(),
+                    egui::Align2::LEFT_CENTER,
+                    format!("Mermaid: {error}"),
+                    FontId::new(size * 0.85, options.family.clone()),
+                    ui.visuals().weak_text_color(),
+                );
+            }
+        } else {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                options.language.text("Rendering diagram…"),
+                FontId::new(size, options.family.clone()),
+                ui.visuals().weak_text_color(),
+            );
+        }
+        let response = ui
+            .interact(
+                rect,
+                output.response.id.with(("mermaid", block.index)),
+                egui::Sense::click(),
+            )
+            .on_hover_text(options.language.text("Click to edit diagram source"));
+        if response.clicked() {
+            *jump = Some(block.source_range.start);
+        }
+    }
+}
+
+#[cfg(test)]
+mod mermaid_projection_tests {
+    use super::*;
+    #[test]
+    fn mermaid_is_an_object_outside_and_literal_fence_inside() {
+        let source = "Before\n\n```mermaid\nflowchart LR\nA --> B\n```\n\nAfter\n";
+        let document = Document::parse(source);
+        let rendered = Projection::build(&document, None);
+        let block = rendered.blocks.iter().find(|block| block.diagram).unwrap();
+        assert!(!rendered.text.contains("flowchart LR"));
+        let revealed = Projection::build(&document, Some(&block.source_range));
+        assert!(revealed.text.contains("```mermaid\nflowchart LR"));
+        assert!(revealed.text.contains("After"));
+        assert_eq!(document.to_markdown(), source);
+        assert!(rendered.to_source.windows(2).all(|pair| pair[0] <= pair[1]));
+    }
+    #[test]
+    fn open_mermaid_fences_stay_source() {
+        let document = Document::parse("```mermaid\nflowchart LR\nA --> B\n");
+        let projection = Projection::build(&document, None);
+        assert!(projection.blocks.iter().all(|block| !block.diagram));
+        assert!(projection.text.contains("flowchart LR"));
+    }
+}
+
+#[cfg(test)]
+mod adjacent_line_tests {
+    use super::*;
+    #[test]
+    fn inactive_hard_break_paragraph_renders_bold_and_hides_markers() {
+        for marker in ["  ", "\\", ""] {
+            let source = format!("**Студент:** Леонид{marker}\n**Группа:** Р3231\n\n");
+            let document = Document::parse(&source);
+            let projection = Projection::build(&document, None);
+            assert!(projection.text.contains("Студент: Леонид\nГруппа: Р3231"));
+            assert!(!projection.text.contains("**"));
+            assert_eq!(caret_block(&document, source.chars().count()), None);
+            assert!(
+                projection
+                    .to_source
+                    .windows(2)
+                    .all(|pair| pair[0] <= pair[1])
+            );
+            assert_eq!(document.to_markdown(), source);
         }
     }
 }

@@ -100,3 +100,53 @@ continuous Live editor. Original YAML is editable while the caret is inside;
 outside it renders property rows/tag chips. Comments and formatting stay intact.
 The constructor module and separate property mutation/serialization API are
 removed. Invalid YAML remains source-visible. Native tests/build remain unrun.
+
+
+## 0.7.6 source update
+
+Adds native Mermaid fenced-block rendering outside the caret, source editing
+inside, bounded worker/cache and source-preserving error fallback. GUI launches
+re-execute into their own session and release the invoking terminal; --foreground
+and profiling remain attached for diagnostics. Launcher icons and makepkg !lto
+corrections are retained. Rust compilation/native runtime remain unverified here.
+
+
+## 0.7.7 corrections
+
+Soft and hard paragraph breaks share semantic/source-map newline handling, so
+adjacent bold lines with two-space or backslash breaks no longer fall back to
+raw text. Source bytes and Unicode/CRLF anchors remain unchanged.
+Search-match jumps no longer request editor focus. Direct document/object jumps
+still activate editing; typing, Enter and Shift+Enter keep the find field active.
+Find/replace uses two aligned grid rows: all find controls stay together and the
+Replace all button occupies their combined width. A horizontal scroll fallback
+handles unusually narrow editor widths. Saved uses saturated lime, with a darker
+variant for light-theme contrast.
+
+Rust regression cases cover break formats/source round trips, inactive projection
+and successive find-query letters/Enter in Live, Source and Hex. These cases are
+unrun without Rust/Cargo; native focus/geometry and compilation remain unverified.
+
+
+## 0.7.8 source responsiveness and Live boundary corrections
+
+The previous Source path re-highlighted the entire file synchronously on each
+text change. Markdown Enter additionally parsed a full Document for continuation.
+These are code-confirmed costs, not a measured attribution of the user's latency.
+Source highlighting now runs on one lazy, sleeping worker with line checkpoints,
+suffix-state convergence, cancellation/coalescing and revision-checked results.
+Source Undo uses bounded changed fragments rather than persistent full-text native
+snapshots. IME commit/cancel and explicit replacements share this history. Ordinary
+Enter uses a lightweight container helper and dirty checks avoid byte copies.
+
+Live text mutations retain unchanged Mermaid object geometry in the same layout
+pass. A single Backspace/Delete at a collapsed table/diagram/property boundary
+reveals source and preserves bytes; deliberate whole-object selection can delete
+it. Source language coverage is retained; LSP and Live fence highlighting have not
+been replaced. See SOURCE_PERFORMANCE.md for limits and diagnostic commands.
+
+Rust regression tests cover Unicode/CRLF undo, redo branching/IME/budgets,
+900-line incremental highlighting compared with a fresh parse, multiline state
+changes, source continuation, same-pass Mermaid height and table boundary safety.
+Cargo/rustc are absent: compilation, Rust tests, clippy/formatting, native input,
+CPU and timing measurements have not been run. No speedup percentage is claimed.

@@ -134,3 +134,18 @@ only when visible. Active YAML reuses the existing syntax cache. Layout and pain
 share the same reserved height even when text/tag rows wrap. No timer or worker
 was added. Source, backlink and YAML caches and the 200 FPS ceiling are retained.
 Native performance and interaction remain unverified in this environment.
+
+
+## 0.7.6 diagrams
+
+Only visible inactive Mermaid objects enqueue parse/layout/raster work. One lazy
+worker blocks on a bounded channel; completed textures are cached by source/theme.
+No spinner/repaint loop keeps a diagram waiting frame alive. Font discovery runs
+once on the worker. Input, graph, SVG and raster sizes are bounded; texture cache
+cost is capped at 64 MiB plus small source/metadata entries. Diagram completion
+invalidates geometry only if the reserved height changes.
+
+Background process startup runs once before GUI initialization, with one socket
+acknowledgement and a ten-second failure timeout. There is no supervisor/polling
+thread after launch. The 200 FPS ceiling remains. Neither native CPU percentages
+nor end-to-end detachment have been measured in this environment.

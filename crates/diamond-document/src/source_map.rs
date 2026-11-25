@@ -219,7 +219,7 @@ fn visible_mapping(source: &str, block: &Block) -> VisibleMapping {
                     mapping.spans.pop();
                 }
             }
-            Event::SoftBreak => {
+            Event::SoftBreak | Event::HardBreak => {
                 mapping.text.push('\n');
                 mapping.spans.push(span);
             }

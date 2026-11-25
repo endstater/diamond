@@ -211,62 +211,146 @@ impl Document {
         }) {
             return None;
         }
-        let start = map.source[..byte].rfind('\n').map_or(0, |at| at + 1);
-        let end = map.source[byte..]
-            .find('\n')
-            .map_or(map.source.len(), |at| byte + at);
-        let line = map.source[start..end].trim_end_matches('\r');
-        let info = prefix(line);
-        if byte < start + info.bytes {
-            return None;
-        }
-        let newline = if map.source.contains("\r\n") {
-            "\r\n"
-        } else {
-            "\n"
-        };
-        let source_start = map.source[..start].chars().count();
-        if let Some(marker) = &info.list {
-            if line[info.bytes..].trim().is_empty() {
-                let parent = map.source[..start]
-                    .lines()
-                    .rev()
-                    .map(prefix)
-                    .take_while(|p| p.quotes == info.quotes)
-                    .find(|p| p.list.is_some() && p.indent < info.indent);
-                let replacement = parent
-                    .map(|parent| {
-                        format!(
-                            "{}{}{}",
-                            parent.quote_shell,
-                            " ".repeat(parent.indent),
-                            parent.list.as_ref().unwrap().next()
-                        )
-                    })
-                    .unwrap_or_else(|| info.quote_shell.clone());
-                return Some(Continuation {
-                    range: source_start..caret,
-                    text: replacement,
-                });
-            }
-            let shell = &line[..info.marker_start];
+        continuation(&map.source, caret, byte)
+    }
+}
+
+fn continuation(source: &str, caret: usize, byte: usize) -> Option<Continuation> {
+    let start = source[..byte].rfind('\n').map_or(0, |at| at + 1);
+    let end = source[byte..]
+        .find('\n')
+        .map_or(source.len(), |at| byte + at);
+    let line = source[start..end].trim_end_matches('\r');
+    let info = prefix(line);
+    if byte < start + info.bytes {
+        return None;
+    }
+    let newline = if source.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let source_start = source[..start].chars().count();
+    if let Some(marker) = &info.list {
+        if line[info.bytes..].trim().is_empty() {
+            let parent = source[..start]
+                .lines()
+                .rev()
+                .map(prefix)
+                .take_while(|p| p.quotes == info.quotes)
+                .find(|p| p.list.is_some() && p.indent < info.indent);
+            let replacement = parent
+                .map(|parent| {
+                    format!(
+                        "{}{}{}",
+                        parent.quote_shell,
+                        " ".repeat(parent.indent),
+                        parent.list.as_ref().unwrap().next()
+                    )
+                })
+                .unwrap_or_else(|| info.quote_shell.clone());
             return Some(Continuation {
-                range: caret..caret,
-                text: format!("{newline}{shell}{}", marker.next()),
+                range: source_start..caret,
+                text: replacement,
             });
         }
-        if info.quotes > 0 {
-            if line[info.bytes..].trim().is_empty() {
-                return Some(Continuation {
-                    range: source_start..caret,
-                    text: "> ".repeat(info.quotes - 1),
-                });
-            }
+        let shell = &line[..info.marker_start];
+        return Some(Continuation {
+            range: caret..caret,
+            text: format!("{newline}{shell}{}", marker.next()),
+        });
+    }
+    if info.quotes > 0 {
+        if line[info.bytes..].trim().is_empty() {
             return Some(Continuation {
-                range: caret..caret,
-                text: format!("{newline}{}", &line[..info.bytes]),
+                range: source_start..caret,
+                text: "> ".repeat(info.quotes - 1),
             });
         }
-        None
+        return Some(Continuation {
+            range: caret..caret,
+            text: format!("{newline}{}", &line[..info.bytes]),
+        });
+    }
+    None
+}
+
+/// Source-mode Enter without constructing semantic blocks, maps or history.
+/// Ordinary lines return before the fence scan. Container candidates only scan
+/// preceding physical prefixes; code/math regions never continue list markers.
+pub fn source_line_continuation(source: &str, caret: usize) -> Option<Continuation> {
+    let byte = source
+        .char_indices()
+        .map(|(at, _)| at)
+        .chain(std::iter::once(source.len()))
+        .nth(caret)?;
+    let start = source[..byte].rfind('\n').map_or(0, |at| at + 1);
+    let end = source[byte..]
+        .find('\n')
+        .map_or(source.len(), |at| byte + at);
+    let line = source[start..end].trim_end_matches('\r');
+    let info = prefix(line);
+    if info.list.is_none() && info.quotes == 0 {
+        return None;
+    }
+    let mut fence: Option<(u8, usize)> = None;
+    let mut math = false;
+    for line in source[..start].lines() {
+        let body = &line[prefix(line).bytes..];
+        let marker = body.as_bytes().first().copied();
+        if let Some((kind, count)) = fence {
+            if marker == Some(kind)
+                && body.bytes().take_while(|c| *c == kind).count() >= count
+                && body.trim_start_matches(kind as char).trim().is_empty()
+            {
+                fence = None;
+            }
+            continue;
+        }
+        if matches!(marker, Some(b'`' | b'~')) {
+            let kind = marker.unwrap();
+            let count = body.bytes().take_while(|c| *c == kind).count();
+            if count >= 3 {
+                fence = Some((kind, count));
+                continue;
+            }
+        }
+        if body.trim() == "$$" {
+            math = !math;
+        }
+    }
+    if fence.is_some() || math {
+        return None;
+    }
+    continuation(source, caret, byte)
+}
+
+#[cfg(test)]
+mod source_enter_tests {
+    use super::*;
+    #[test]
+    fn source_continuations_match_the_model_for_nested_unicode_crlf_and_fences() {
+        for source in [
+            "1. привет",
+            "- [x] 你好🙂",
+            "- parent\n  - nested",
+            "- parent\n  - ",
+            "> quote\n> > child",
+            "> > ",
+            "1. a\r\n2. b",
+            "```rust\n- item",
+            "~~~\n> quote",
+            "```\ncode\n```\n- item",
+            "$$\n- x",
+            "hello\n\n",
+            "- a\n\n- b",
+        ] {
+            let caret = source.chars().count();
+            assert_eq!(
+                source_line_continuation(source, caret),
+                Document::parse(source).line_continuation(caret),
+                "{source:?}"
+            );
+        }
     }
 }

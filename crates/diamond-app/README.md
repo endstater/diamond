@@ -63,3 +63,10 @@ See docs/PERFORMANCE.md for scope and unverified native behavior.
 0.7.4 opens semantic tag links in vault search (`tag:name`) and caches backlink
 indices per index generation and active note. Saved YAML tags and body tags use
 one index, including nested tags. No additional repaint timer or worker is added.
+
+
+0.7.6 detaches GUI launches into a new POSIX session before GUI threads start.
+A startup socket confirms setsid before the parent returns. Relative OS paths
+and cwd are preserved; output appends to XDG_STATE_HOME/diamond/diamond.log.
+--foreground and DIAMOND_PROFILE=1 retain direct diagnostics. Informational CLI
+commands never detach. See docs/LAUNCH.md; native terminal tests remain pending.

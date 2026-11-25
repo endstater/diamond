@@ -26,7 +26,7 @@ impl Tab {
                 return dirty;
             }
         }
-        let dirty = !self.editor.bytes().is_ok_and(|bytes| bytes == self.loaded);
+        let dirty = !self.editor.matches_bytes(&self.loaded);
         self.dirty_cache.set(Some((key, dirty)));
         dirty
     }

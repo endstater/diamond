@@ -1,8 +1,8 @@
 # Build an installable Arch package from the current checkout and its existing target cache.
 # Run: cd packaging && makepkg -si -p PKGBUILD.local
 pkgname=diamond
-pkgver=0.7.5
-pkgrel=3
+pkgver=0.7.8
+pkgrel=1
 pkgdesc='Native Markdown workspace with process plugins and live editing'
 arch=('x86_64' 'aarch64')
 url='https://github.com/endstater/diamond'
@@ -39,5 +39,6 @@ package() {
     install -Dm644 assets/lucide/LICENSE "$pkgdir/usr/share/licenses/$pkgname/LUCIDE"
     install -Dm644 assets/licenses/LATEX-RUST-MIT.txt "$pkgdir/usr/share/licenses/$pkgname/LATEX-RUST-MIT"
     install -Dm644 assets/licenses/STIX-OFL.txt "$pkgdir/usr/share/licenses/$pkgname/STIX-OFL"
+    install -Dm644 assets/licenses/MERMAID-RS-RENDERER-MIT.txt "$pkgdir/usr/share/licenses/$pkgname/MERMAID-RS-RENDERER-MIT"
     install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
 }

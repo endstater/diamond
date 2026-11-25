@@ -10,6 +10,9 @@ Inspired by the facets and perfection of a cut diamond, the project brings usefu
 
 ## Features
 
+- AI-agent friendly: notes are plain Markdown files that agents can read and edit directly, with no proprietary format or export step.
+- Native Mermaid diagrams with source editing and cached rendering.
+- Terminal-independent launch; `--foreground` for diagnostics.
 - Caret-aware YAML properties: type source, render when the caret leaves.
 - Clickable Unicode tags with exact and nested-tag search.
 - Live Markdown with autosave, nested lists and tasks, quotes, tables, math and footnotes.

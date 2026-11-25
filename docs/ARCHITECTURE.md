@@ -189,3 +189,44 @@ cached height reserves space in native layout and paints the object, preventing
 wrap discrepancies from overlapping the following paragraph. Clicking the block
 requests source focus; chips route semantic tag links to exact/hierarchical vault
 search. No YAML content is executed and no new polling clock is introduced.
+
+
+## Native diagrams and process launch (0.7.6)
+
+Mermaid remains an ordinary semantic Code block with language mermaid. A closed,
+inactive fence projects to one mapped diagram atom; active/source mode retains
+literal Markdown. One lazily started worker performs native parse/layout/SVG and
+bounded rasterization. The context cache stores source/theme results, and only
+visible objects submit jobs. No JS engine, plugin execution, remote render service
+or periodic polling is added. Rust Mermaid compatibility is bounded by its native
+backend; errors never replace the source. See MERMAID.md.
+
+The GUI's entry point parses CLI paths/flags before initializing fonts/windows.
+By default it re-executes a child, which calls safe rustix setsid and acknowledges
+over a startup Unix socket. The parent then exits; stdout/stderr are log files,
+not terminal handles. Foreground diagnostics and info commands remain explicit.
+This avoids pre_exec hooks or forking a live GUI/thread pool. See LAUNCH.md.
+
+
+## 0.7.8 source responsiveness and Live boundary corrections
+
+The previous Source path re-highlighted the entire file synchronously on each
+text change. Markdown Enter additionally parsed a full Document for continuation.
+These are code-confirmed costs, not a measured attribution of the user's latency.
+Source highlighting now runs on one lazy, sleeping worker with line checkpoints,
+suffix-state convergence, cancellation/coalescing and revision-checked results.
+Source Undo uses bounded changed fragments rather than persistent full-text native
+snapshots. IME commit/cancel and explicit replacements share this history. Ordinary
+Enter uses a lightweight container helper and dirty checks avoid byte copies.
+
+Live text mutations retain unchanged Mermaid object geometry in the same layout
+pass. A single Backspace/Delete at a collapsed table/diagram/property boundary
+reveals source and preserves bytes; deliberate whole-object selection can delete
+it. Source language coverage is retained; LSP and Live fence highlighting have not
+been replaced. See SOURCE_PERFORMANCE.md for limits and diagnostic commands.
+
+Rust regression tests cover Unicode/CRLF undo, redo branching/IME/budgets,
+900-line incremental highlighting compared with a fresh parse, multiline state
+changes, source continuation, same-pass Mermaid height and table boundary safety.
+Cargo/rustc are absent: compilation, Rust tests, clippy/formatting, native input,
+CPU and timing measurements have not been run. No speedup percentage is claimed.

@@ -13,7 +13,10 @@ use thiserror::Error;
 mod emoji;
 mod live;
 mod math;
+mod mermaid;
 mod property_block;
+mod source_history;
+mod source_syntax;
 mod syntax;
 pub use emoji::install_font as install_emoji_font;
 pub fn syntax_licenses() -> &'static str {
@@ -79,6 +82,7 @@ pub struct EditorBuffer {
     images: media::Images,
     syntax_language: String,
     source_layout: syntax::LayoutCache,
+    source_history: source_history::History,
     language: diamond_core::Language,
     id: u64,
     mode: EditorMode,
@@ -172,6 +176,7 @@ impl EditorBuffer {
             images: media::Images::default(),
             syntax_language: "txt".into(),
             source_layout: Default::default(),
+            source_history: Default::default(),
             language: diamond_core::Language::En,
             id: NEXT_EDITOR_ID.fetch_add(1, Ordering::Relaxed),
             mode: if decoded.is_some() {
@@ -225,6 +230,7 @@ impl EditorBuffer {
         };
         let offset = offset.min(length);
         self.search.jump = Some(offset..offset);
+        self.search.jump_focus = true;
     }
     pub fn preview_offset(&self) -> usize {
         if self.mode == EditorMode::Formatted {
@@ -319,6 +325,24 @@ impl EditorBuffer {
         }
     }
 
+    pub fn matches_bytes(&self, bytes: &[u8]) -> bool {
+        match self.mode {
+            EditorMode::Formatted => self
+                .document
+                .as_ref()
+                .is_some_and(|document| document.source_map_shared().source.as_bytes() == bytes),
+            EditorMode::Source => self.source.as_bytes() == bytes,
+            EditorMode::Image => self.original_bytes.as_slice() == bytes,
+            EditorMode::Hex => {
+                if self.hex_initialized || !self.hex.is_empty() {
+                    decode_hex(&self.hex).is_ok_and(|decoded| decoded == bytes)
+                } else {
+                    self.original_bytes.as_slice() == bytes
+                }
+            }
+        }
+    }
+
     pub fn mode(&self) -> EditorMode {
         self.mode
     }
@@ -336,7 +360,10 @@ impl EditorBuffer {
         }
         if let Some((mode, before)) = self.raw_composition.take() {
             match mode {
-                EditorMode::Source => self.source = before,
+                EditorMode::Source => {
+                    self.source = before;
+                    self.source_history.cancel_composition();
+                }
                 EditorMode::Hex => self.hex = before,
                 EditorMode::Formatted | EditorMode::Image => {}
             }
@@ -409,6 +436,7 @@ impl EditorBuffer {
                 self.source = text;
             }
         }
+        self.source_history = Default::default();
         self.mode = mode;
         self.generation = self.generation.wrapping_add(1);
         self.live.reset();
@@ -418,6 +446,18 @@ impl EditorBuffer {
     }
 
     pub fn undo(&mut self) -> bool {
+        if self.is_composing() {
+            return false;
+        }
+        if self.mode == EditorMode::Source {
+            if let Some(selection) = self.source_history.undo(&mut self.source) {
+                self.selection = selection;
+                self.reset_raw_native = true;
+                self.generation = self.generation.wrapping_add(1);
+                return true;
+            }
+            return false;
+        }
         let changed = self.mode == EditorMode::Formatted
             && self.document.as_mut().is_some_and(Document::undo);
         if changed {
@@ -427,6 +467,18 @@ impl EditorBuffer {
     }
 
     pub fn redo(&mut self) -> bool {
+        if self.is_composing() {
+            return false;
+        }
+        if self.mode == EditorMode::Source {
+            if let Some(selection) = self.source_history.redo(&mut self.source) {
+                self.selection = selection;
+                self.reset_raw_native = true;
+                self.generation = self.generation.wrapping_add(1);
+                return true;
+            }
+            return false;
+        }
         let changed = self.mode == EditorMode::Formatted
             && self.document.as_mut().is_some_and(Document::redo);
         if changed {
@@ -489,7 +541,13 @@ impl EditorBuffer {
                 self.document = Some(next);
             }
             EditorMode::Image => return Ok(0),
-            EditorMode::Source => self.source = self.source.replace(needle, replacement),
+            EditorMode::Source => {
+                let next = self.source.replace(needle, replacement);
+                let edits = source_history::difference(&self.source, &next);
+                self.source_history
+                    .record(edits, self.selection.clone(), self.selection.clone());
+                self.source = next;
+            }
             EditorMode::Hex => self.hex = self.hex.replace(needle, replacement),
         }
         self.generation = self.generation.wrapping_add(1);
@@ -585,7 +643,13 @@ impl EditorBuffer {
             ui.memory_mut(|memory| memory.request_focus(edit_id));
         }
         if self.mode != EditorMode::Formatted && self.reset_raw_native {
-            egui::text_edit::TextEditState::default().store(ui.ctx(), edit_id);
+            let mut native = egui::text_edit::TextEditState::default();
+            native.cursor.set_char_range(Some(egui::text::CCursorRange {
+                primary: egui::text::CCursor::new(self.selection.end),
+                secondary: egui::text::CCursor::new(self.selection.start),
+                h_pos: None,
+            }));
+            native.store(ui.ctx(), edit_id);
             self.reset_raw_native = false;
         }
         let matches = if self.show_find {
@@ -599,6 +663,10 @@ impl EditorBuffer {
             None
         };
         let jump = self.search.jump.take();
+        let jump_focus = std::mem::take(&mut self.search.jump_focus);
+        if jump.is_some() && jump_focus {
+            ui.memory_mut(|memory| memory.request_focus(edit_id));
+        }
         if self.mode != EditorMode::Formatted {
             if let Some(range) = &jump {
                 let mut native =
@@ -639,12 +707,51 @@ impl EditorBuffer {
                     self.hex.clone()
                 };
                 self.raw_composition = Some((self.mode, before));
+                if self.mode == EditorMode::Source {
+                    self.source_history
+                        .begin_composition(self.selection.clone());
+                }
             }
             events
         } else {
             (false, false, false)
         };
         let mut raw_has_focus = false;
+        if self.mode == EditorMode::Source
+            && self.raw_composition.is_none()
+            && !raw_ime.0
+            && ui.memory(|memory| memory.has_focus(edit_id))
+        {
+            let redo = ui.input_mut(|input| {
+                input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z)
+                    || input.consume_key(Modifiers::COMMAND, Key::Y)
+            });
+            let undo = ui.input_mut(|input| input.consume_key(Modifiers::COMMAND, Key::Z));
+            if redo {
+                response.changed |= self.redo();
+            } else if undo {
+                response.changed |= self.undo();
+            }
+            if self.reset_raw_native {
+                let mut native =
+                    egui::text_edit::TextEditState::load(ui.ctx(), edit_id).unwrap_or_default();
+                native.cursor.set_char_range(Some(egui::text::CCursorRange {
+                    primary: egui::text::CCursor::new(self.selection.end),
+                    secondary: egui::text::CCursor::new(self.selection.start),
+                    h_pos: None,
+                }));
+                native.clear_undoer();
+                native.store(ui.ctx(), edit_id);
+                self.reset_raw_native = false;
+            }
+        }
+        let mut source_edits = Vec::new();
+        let source_before_selection = egui::text_edit::TextEditState::load(ui.ctx(), edit_id)
+            .and_then(|native| native.cursor.char_range())
+            .map_or_else(
+                || self.selection.clone(),
+                |cursor| cursor.secondary.index..cursor.primary.index,
+            );
 
         if self.mode == EditorMode::Source
             && self.formatting_allowed
@@ -658,7 +765,7 @@ impl EditorBuffer {
             && let Some(cursor) = native.cursor.char_range()
             && cursor.primary.index == cursor.secondary.index
             && let Some(continuation) =
-                Document::parse(&self.source).line_continuation(cursor.primary.index)
+                diamond_document::source_line_continuation(&self.source, cursor.primary.index)
             && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter))
         {
             let to_byte = |position| {
@@ -671,7 +778,12 @@ impl EditorBuffer {
             };
             let bytes = to_byte(continuation.range.start)..to_byte(continuation.range.end);
             let target = continuation.range.start + continuation.text.chars().count();
-            self.source.replace_range(bytes, &continuation.text);
+            source_history::replace(
+                &mut self.source,
+                bytes,
+                &continuation.text,
+                &mut source_edits,
+            );
             native.cursor.set_char_range(Some(egui::text::CCursorRange {
                 primary: egui::text::CCursor::new(target),
                 secondary: egui::text::CCursor::new(target),
@@ -760,16 +872,32 @@ impl EditorBuffer {
                                         },
                                     )
                                 };
-                            let output = egui::TextEdit::multiline(&mut self.source)
-                                .id(edit_id)
-                                .font(FontId::new(font_size, family.clone()))
-                                .code_editor()
-                                .desired_width(ui.available_width().max(400.0))
-                                .desired_rows(30)
-                                .min_size(egui::vec2(0.0, viewport_height))
-                                .frame(false)
-                                .layouter(&mut layouter)
-                                .show(ui);
+                            if let Some(mut native) =
+                                egui::text_edit::TextEditState::load(ui.ctx(), edit_id)
+                            {
+                                native.clear_undoer();
+                                native.store(ui.ctx(), edit_id);
+                            }
+                            let mut output = {
+                                let mut adapter = source_history::Buffer {
+                                    source: &mut self.source,
+                                    edits: &mut source_edits,
+                                };
+                                egui::TextEdit::multiline(&mut adapter)
+                                    .id(edit_id)
+                                    .font(FontId::new(font_size, family.clone()))
+                                    .code_editor()
+                                    .desired_width(ui.available_width().max(400.0))
+                                    .desired_rows(30)
+                                    .min_size(egui::vec2(0.0, viewport_height))
+                                    .frame(false)
+                                    .layouter(&mut layouter)
+                                    .show(ui)
+                            };
+                            // Native snapshots are transient within this widget call;
+                            // persistent Source history contains only edit fragments.
+                            output.state.clear_undoer();
+                            output.state.clone().store(ui.ctx(), edit_id);
                             emoji::paint(
                                 ui,
                                 &output.galley,
@@ -869,8 +997,19 @@ impl EditorBuffer {
                 }
             }
         }
+        if self.mode == EditorMode::Source {
+            self.source_history.record(
+                source_edits,
+                source_before_selection,
+                self.selection.clone(),
+            );
+        }
         if self.mode != EditorMode::Formatted {
             if raw_ime.1 {
+                if self.mode == EditorMode::Source {
+                    self.source_history
+                        .commit_composition(self.selection.clone());
+                }
                 self.raw_composition = None;
             } else if self.raw_composition.is_some() && (raw_ime.2 || !raw_has_focus) {
                 response.changed |= self.cancel_composition();
@@ -908,99 +1047,145 @@ impl EditorBuffer {
             .corner_radius(10)
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    let query_id = egui::Id::new(("find-query", self.id));
-                    if self.search.focus {
-                        ui.memory_mut(|memory| memory.request_focus(query_id));
-                        self.search.focus = false;
-                    }
-                    let field = ui.add(
-                        egui::TextEdit::singleline(&mut self.find)
-                            .hint_text(tr("Найти…"))
-                            .id(query_id)
-                            .desired_width((ui.available_width() - 190.0).max(100.0))
-                            .min_size(egui::vec2(0.0, 36.0))
-                            .margin(egui::Margin::symmetric(10, 8)),
-                    );
-                    if ui
-                        .selectable_label(self.search.options.case_sensitive, "Aa")
-                        .on_hover_text(tr("Учитывать регистр"))
-                        .clicked()
-                    {
-                        self.search.options.case_sensitive = !self.search.options.case_sensitive;
-                        self.search.focus = true;
-                    }
-                    if ui
-                        .selectable_label(self.search.options.regex, ".*")
-                        .on_hover_text(tr("Регулярное выражение"))
-                        .clicked()
-                    {
-                        self.search.options.regex = !self.search.options.regex;
-                        self.search.focus = true;
-                    }
-                    if svg::button(
-                        ui,
-                        tr("Предыдущее совпадение"),
-                        include_bytes!("../../../assets/lucide/arrow-up.svg"),
-                    )
-                    .clicked()
-                    {
-                        self.search.navigate(false);
-                    }
-                    if svg::button(
-                        ui,
-                        tr("Следующее совпадение"),
-                        include_bytes!("../../../assets/lucide/arrow-down.svg"),
-                    )
-                    .clicked()
-                    {
-                        self.search.navigate(true);
-                    }
-                    if svg::button(
-                        ui,
-                        tr("Закрыть поиск · Esc"),
-                        include_bytes!("../../../assets/lucide/x.svg"),
-                    )
-                    .clicked()
-                    {
-                        self.show_find = false;
-                    }
-                    if field.has_focus()
-                        && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter))
-                    {
-                        self.search.navigate(true);
-                    }
-                    if field.has_focus()
-                        && ui.input_mut(|input| input.consume_key(Modifiers::SHIFT, Key::Enter))
-                    {
-                        self.search.navigate(false);
-                    }
-                });
-                ui.horizontal_wrapped(|ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.replacement)
-                            .hint_text(tr("Заменить на…"))
-                            .desired_width((ui.available_width() - 170.0).max(100.0))
-                            .min_size(egui::vec2(0.0, 36.0))
-                            .margin(egui::Margin::symmetric(10, 8)),
-                    );
-                    replace = ui
-                        .add_enabled(
-                            !self.is_composing() && self.search.error.is_none(),
-                            egui::Button::new(tr("Заменить все")),
-                        )
-                        .clicked();
-                    let count = self.search.matches.len();
-                    ui.label(format!(
-                        "{}/{}",
-                        if count == 0 {
-                            0
-                        } else {
-                            self.search.current + 1
-                        },
-                        count
-                    ));
-                });
+                let query_id = egui::Id::new(("find-query", self.id));
+                if self.search.focus {
+                    ui.memory_mut(|memory| memory.request_focus(query_id));
+                    self.search.focus = false;
+                }
+                let button_font = egui::TextStyle::Button.resolve(ui.style());
+                let toggle_width = ui
+                    .fonts_mut(|fonts| {
+                        fonts
+                            .layout_no_wrap("Aa".into(), button_font, ui.visuals().text_color())
+                            .size()
+                            .x
+                    })
+                    .max(20.0)
+                    + ui.spacing().button_padding.x * 2.0;
+                let spacing = ui.spacing().item_spacing.x;
+                let controls_width = toggle_width * 2.0 + 32.0 * 3.0 + spacing * 4.0;
+                let input_width = (ui.available_width() - controls_width - spacing).max(40.0);
+                egui::ScrollArea::horizontal()
+                    .id_salt(("find-controls-scroll", self.id))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        egui::Grid::new(("find-rows", self.id))
+                            .num_columns(2)
+                            .spacing([spacing, 8.0])
+                            .show(ui, |ui| {
+                                // Consume Enter before the single-line field can surrender focus.
+                                if ui.memory(|memory| memory.has_focus(query_id)) {
+                                    if ui.input_mut(|input| {
+                                        input.consume_key(Modifiers::SHIFT, Key::Enter)
+                                    }) {
+                                        self.search.navigate(false);
+                                    } else if ui.input_mut(|input| {
+                                        input.consume_key(Modifiers::NONE, Key::Enter)
+                                    }) {
+                                        self.search.navigate(true);
+                                    }
+                                }
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.find)
+                                        .hint_text(tr("Найти…"))
+                                        .id(query_id)
+                                        .desired_width((input_width - 20.0).max(1.0))
+                                        .min_size(egui::vec2(0.0, 36.0))
+                                        .margin(egui::Margin::symmetric(10, 8)),
+                                );
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(controls_width, 36.0),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .add_sized(
+                                                [toggle_width, 36.0],
+                                                egui::Button::new("Aa")
+                                                    .selected(self.search.options.case_sensitive),
+                                            )
+                                            .on_hover_text(tr("Учитывать регистр"))
+                                            .clicked()
+                                        {
+                                            self.search.options.case_sensitive =
+                                                !self.search.options.case_sensitive;
+                                            self.search.focus = true;
+                                        }
+                                        if ui
+                                            .add_sized(
+                                                [toggle_width, 36.0],
+                                                egui::Button::new(".*")
+                                                    .selected(self.search.options.regex),
+                                            )
+                                            .on_hover_text(tr("Регулярное выражение"))
+                                            .clicked()
+                                        {
+                                            self.search.options.regex = !self.search.options.regex;
+                                            self.search.focus = true;
+                                        }
+                                        if svg::button(
+                                            ui,
+                                            tr("Предыдущее совпадение"),
+                                            include_bytes!("../../../assets/lucide/arrow-up.svg"),
+                                        )
+                                        .clicked()
+                                        {
+                                            self.search.navigate(false);
+                                            self.search.focus = true;
+                                        }
+                                        if svg::button(
+                                            ui,
+                                            tr("Следующее совпадение"),
+                                            include_bytes!("../../../assets/lucide/arrow-down.svg"),
+                                        )
+                                        .clicked()
+                                        {
+                                            self.search.navigate(true);
+                                            self.search.focus = true;
+                                        }
+                                        if svg::button(
+                                            ui,
+                                            tr("Закрыть поиск · Esc"),
+                                            include_bytes!("../../../assets/lucide/x.svg"),
+                                        )
+                                        .clicked()
+                                        {
+                                            self.show_find = false;
+                                        }
+                                    },
+                                );
+                                ui.end_row();
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.replacement)
+                                        .hint_text(tr("Заменить на…"))
+                                        .desired_width((input_width - 20.0).max(1.0))
+                                        .min_size(egui::vec2(0.0, 36.0))
+                                        .margin(egui::Margin::symmetric(10, 8)),
+                                );
+                                replace = ui
+                                    .add_enabled_ui(
+                                        !self.is_composing() && self.search.error.is_none(),
+                                        |ui| {
+                                            ui.add_sized(
+                                                [controls_width, 36.0],
+                                                egui::Button::new(tr("Заменить все")),
+                                            )
+                                        },
+                                    )
+                                    .inner
+                                    .clicked();
+                                ui.end_row();
+                            });
+                    });
+                let count = self.search.matches.len();
+                ui.label(format!(
+                    "{}/{}",
+                    if count == 0 {
+                        0
+                    } else {
+                        self.search.current + 1
+                    },
+                    count
+                ));
                 if let Some(error) = &self.search.error {
                     ui.label(error);
                 }
@@ -1029,6 +1214,12 @@ impl EditorBuffer {
                             }),
                         EditorMode::Image => Ok(()),
                         EditorMode::Source => {
+                            let edits = source_history::difference(&self.source, &next);
+                            self.source_history.record(
+                                edits,
+                                self.selection.clone(),
+                                self.selection.clone(),
+                            );
                             self.source = next;
                             Ok(())
                         }
@@ -1269,5 +1460,64 @@ mod image_tests {
         assert_eq!(buffer.bytes().unwrap(), bytes);
         buffer.set_mode(EditorMode::Image).unwrap();
         assert_eq!(buffer.bytes().unwrap(), bytes);
+    }
+}
+
+#[cfg(test)]
+mod find_focus_tests {
+    use super::*;
+    #[test]
+    fn successive_query_letters_and_enter_keep_query_focus_in_all_text_modes() {
+        for mode in [EditorMode::Formatted, EditorMode::Source, EditorMode::Hex] {
+            let ctx = egui::Context::default();
+            let mut buffer = EditorBuffer::from_bytes(b"abc abc\n");
+            buffer.set_mode(mode).unwrap();
+            let before = buffer.bytes().unwrap();
+            buffer.open_find();
+            let query = egui::Id::new(("find-query", buffer.id));
+            let letters = if mode == EditorMode::Hex {
+                ["6", "1"]
+            } else {
+                ["a", "b"]
+            };
+            let mut wanted = String::new();
+            for frame in 0..4 {
+                let mut input = egui::RawInput {
+                    focused: true,
+                    time: Some(frame as f64),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 650.0),
+                    )),
+                    ..Default::default()
+                };
+                if frame == 1 || frame == 2 {
+                    let letter = letters[frame - 1];
+                    input.events.push(egui::Event::Text(letter.into()));
+                    wanted.push_str(letter);
+                }
+                if frame == 3 {
+                    input.events.push(egui::Event::Key {
+                        key: Key::Enter,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: Modifiers::NONE,
+                    });
+                }
+                let _ = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        buffer.ui(ui);
+                    });
+                });
+                assert_eq!(
+                    ctx.memory(|memory| memory.focused()),
+                    Some(query),
+                    "mode {mode:?}, frame {frame}"
+                );
+                assert_eq!(buffer.find, wanted);
+                assert_eq!(buffer.bytes().unwrap(), before);
+            }
+        }
     }
 }

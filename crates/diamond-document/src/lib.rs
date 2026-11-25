@@ -19,7 +19,7 @@ pub use table_edit::TableAction;
 mod containers;
 pub mod frontmatter;
 pub mod tags;
-pub use containers::Continuation;
+pub use containers::{Continuation, source_line_continuation};
 
 pub use source_map::{BlockSourceMap, SourceMap};
 pub use structures::{CellAlignment, Image, Table, TableCell};
@@ -1000,7 +1000,7 @@ fn parse_inline(source: &str, kind: &BlockKind) -> Option<Inline> {
                 position += length;
                 text.push_str(&value);
             }
-            Event::SoftBreak => {
+            Event::SoftBreak | Event::HardBreak => {
                 text.push('\n');
                 position += 1;
             }
@@ -1834,5 +1834,34 @@ mod grouping_cache_test {
         assert!(!document.undo());
         assert!(document.redo());
         assert_eq!(document.to_markdown(), map.source);
+    }
+}
+
+#[cfg(test)]
+mod hard_break_tests {
+    use super::*;
+    #[test]
+    fn adjacent_bold_lines_with_spaces_or_backslash_breaks_are_semantic() {
+        for newline in ["\n", "\r\n"] {
+            for marker in ["  ", "\\"] {
+                let source = format!(
+                    "**Студент:** Рогозов Леонид{marker}{newline}**Группа:** Р3231{marker}{newline}**Вариант:** 99123{marker}{newline}**Платформа:** Java 17{marker}{newline}**Среда:** Helios{newline}{newline}"
+                );
+                let document = Document::parse(&source);
+                assert_eq!(document.blocks()[0].kind, BlockKind::Paragraph);
+                assert_eq!(
+                    document.blocks()[0]
+                        .marks
+                        .iter()
+                        .filter(|mark| mark.kind == MarkKind::Bold)
+                        .count(),
+                    5
+                );
+                let map = document.source_map_shared();
+                assert!(map.blocks[0].is_exact);
+                assert!(!document.blocks()[0].text.contains("**"));
+                assert_eq!(document.to_markdown(), source);
+            }
+        }
     }
 }

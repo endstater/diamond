@@ -9,6 +9,7 @@ pub(super) struct SearchState {
     pub matches: Vec<Range<usize>>,
     pub current: usize,
     pub jump: Option<Range<usize>>,
+    pub jump_focus: bool,
     pub error: Option<String>,
     key: Option<(String, SearchOptions, u64)>,
     compiled: Option<SearchPattern>,
@@ -34,6 +35,7 @@ impl SearchState {
             self.compiled = None;
             self.error = None;
             self.jump = None;
+            self.jump_focus = false;
             return;
         }
         if recompile {
@@ -55,6 +57,7 @@ impl SearchState {
         if recompile {
             self.current = 0;
             self.jump = self.matches.first().cloned();
+            self.jump_focus = false;
         } else {
             self.current = self.current.min(self.matches.len().saturating_sub(1));
         }
@@ -70,6 +73,7 @@ impl SearchState {
             (self.current + count - 1) % count
         };
         self.jump = Some(self.matches[self.current].clone());
+        self.jump_focus = false;
     }
     pub fn replace(&self, text: &str, replacement: &str) -> Option<String> {
         self.compiled

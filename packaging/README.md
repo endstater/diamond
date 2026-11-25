@@ -37,8 +37,8 @@ Cargo может обновить Cargo.lock и загрузить новые з
 
 ## Из отдельного архива исходников
 
-Обычный `PKGBUILD` предназначен для полного архива `diamond-0.7.5.tar.gz` с корнем
-`diamond-0.7.5/`, лежащего рядом с ним. Это иной архив, не обновление `-files`.
+Обычный `PKGBUILD` предназначен для полного архива `diamond-0.7.6.tar.gz` с корнем
+`diamond-0.7.6/`, лежащего рядом с ним. Это иной архив, не обновление `-files`.
 Для него `makepkg -si` сначала подготавливает зависимости и запускает check().
 Перед распространением замените SKIP настоящей SHA256 через updpkgsums.
 Эти рецепты не означают публикацию в AUR или официальный репозиторий Arch.
@@ -49,3 +49,8 @@ Cargo может обновить Cargo.lock и загрузить новые з
 В обоих рецептах включена установка растровых вариантов иконки и единого ярлыка.
 `!lto` сохранён для обхода makepkg/ring-конфликта; Cargo ThinLTO не меняется.
 Rust-исходники в этом исправлении не меняются, существующий target сохраняется.
+
+
+0.7.6 launches independently from the terminal by default. Use `diamond --foreground .`
+for direct logs, or inspect `~/.local/state/diamond/diamond.log` after a detached
+launch. Mermaid is native Rust and requires no additional runtime browser/Node.

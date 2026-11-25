@@ -14,7 +14,7 @@ Unsupported/ambiguously mapped blocks keep their source visible for safe edits.
 
 `EditorBuffer::from_bytes` never performs lossy UTF-8 conversion. Non-UTF-8 bytes start in hexadecimal mode. `bytes()` rejects invalid hex, so an invalid edit cannot be silently committed. Switching modes first validates the current buffer and keeps it intact on error. Switching from edited source back to formatted mode parses the new source and starts a new semantic undo history.
 
-The source editor includes native selection, clipboard/IME, an elementary lexical highlighter, and cached case-aware and regex find/replace with highlighting, navigation and Escape to close. Search results use Unicode scalar ranges. It is not an LSP client, a full language grammar, or a large-file virtualized editor. Formatted undo/redo covers the document model, including formatting and block changes. Source/hex typing undo is provided by egui.
+The source editor includes native selection, clipboard/IME, grammar-based highlighting, and cached case-aware and regex find/replace with highlighting, navigation and Escape to close. Search results use Unicode scalar ranges. It is not an LSP client, a full language grammar, or a large-file virtualized editor. Formatted undo/redo covers the document model, including formatting and block changes. Source typing uses bounded insertion/deletion history; Hex typing undo is provided by egui.
 
 Public API: `EditorBuffer::{from_bytes, bytes, mode, set_mode, is_binary, document, source_text, find_all, replace_all, ui, ui_with_options}`; `EditorResponse` reports changes and errors to the desktop host. The host owns file paths, save conflict detection, and original-byte tracking.
 
@@ -72,3 +72,64 @@ chips. Clicking the block reveals source, while tags navigate to search. There
 is no constructor, form or separate property panel. Rendering never rewrites
 YAML comments/formatting. Native source transactions retain editing/history and
 source-mode galley caching remains intact.
+
+
+0.7.6 renders closed mermaid fences as source-anchored diagram objects outside
+the caret. A bounded lazy worker uses mermaid-rs-renderer 0.3.1 SVG and resvg text
+support, with no browser/Node. Only visible objects request work; source/theme
+textures are cached and completion wakes the GUI. Invalid/oversized diagrams
+stay clickable for source editing. See docs/MERMAID.md for limits.
+
+
+## 0.7.7 corrections
+
+Soft and hard paragraph breaks share semantic/source-map newline handling, so
+adjacent bold lines with two-space or backslash breaks no longer fall back to
+raw text. Source bytes and Unicode/CRLF anchors remain unchanged.
+Search-match jumps no longer request editor focus. Direct document/object jumps
+still activate editing; typing, Enter and Shift+Enter keep the find field active.
+Find/replace uses two aligned grid rows: all find controls stay together and the
+Replace all button occupies their combined width. A horizontal scroll fallback
+handles unusually narrow editor widths. Saved uses saturated lime, with a darker
+variant for light-theme contrast.
+
+Rust regression cases cover break formats/source round trips, inactive projection
+and successive find-query letters/Enter in Live, Source and Hex. These cases are
+unrun without Rust/Cargo; native focus/geometry and compilation remain unverified.
+
+
+## 0.7.8 source responsiveness and Live boundaries
+
+Source grammar work runs on one lazy background thread, with per-line tokens and
+parse/highlight checkpoints every 32 lines. It resumes before the first changed
+line and reuses a common suffix once both states converge. One pending request per
+editor coalesces rapid input, running work checks cancellation between lines, and
+only a current result affects layout. The worker sleeps on a condition variable;
+there is no timer/polling. Until ready, Unicode-safe remapping retains unchanged
+colors around the edit. File/language/theme changes invalidate grammar state;
+fonts/wrapping/find only invalidate layout. Source has no synchronous grammar call.
+
+At most eight completed source checkpoints are retained, each bounded to 512 KiB /
+8192 lines / 16 KiB per line; larger input remains plain editable text. Text layout
+itself still uses egui's whole-buffer editor; this is not a virtualized editor.
+The existing Live fence highlighter is unchanged in this revision. LSP integration
+and per-language server settings are not implemented.
+
+Source Undo/Redo stores insert/delete fragments and scalar selections, bounded to
+256 transactions / 8 MiB including Redo. Native callbacks provide edits directly;
+there is no whole-document diff on ordinary typing. Find Replace uses one compact
+prefix/suffix difference. IME preedit changes form one committed transaction;
+cancellation discards pending edits and restores the preedit snapshot. Egui's
+transient per-call text copies remain, but native undo snapshots are cleared before
+and after the source widget. Hex and Live history semantics remain independent.
+
+Source Enter calls the lightweight container continuation helper instead of
+constructing/parsing a semantic document. Dirty checks compare current bytes
+without copying Source. DIAMOND_PROFILE=1 logs actual source layout/grammar work;
+DIAMOND_SYNTAX=0 provides a Source-only diagnostic baseline without grammar work.
+
+Live rebuilds inside native editing callbacks inherit an unchanged Mermaid
+object's measured height, so the same pass does not shrink it to its placeholder.
+A single-character deletion at a collapsed table/diagram/property boundary reveals
+its source without changing document bytes/history. Explicit whole-object
+selection still permits deletion. Regression cases are included but unrun here.

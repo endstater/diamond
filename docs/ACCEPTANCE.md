@@ -84,3 +84,13 @@ Code получает язык в отдельной строке и реаль�
 | Inactive block | Cached property rows, wrapped clickable tag chips | Native appearance pending |
 | Preservation | No mapping serialization; source comments/CRLF/body retained | Rust regression tests added, unrun |
 | Navigation | Click block/keyboard entry reveals YAML; next line collapses it | Rust boundary tests added, unrun |
+
+
+## 0.7.6 additions (native runtime verification pending)
+
+| Area | Prepared behavior | Limit |
+| --- | --- | --- |
+| Mermaid | Closed fences render outside the caret; click/source edit inside | Native engine compatibility; bounded graph/canvas |
+| Diagram work | One lazy worker, visible-only requests, source/theme texture cache | No hard worker time limit |
+| CLI GUI launch | New session, startup acknowledgement, cwd/path preservation | GPU/window readiness reported in log |
+| Diagnostics | --foreground and profiling stay attached; info flags print directly | Native shell-hangup test pending |

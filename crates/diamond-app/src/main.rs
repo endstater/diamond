@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 mod icons;
+mod launch;
 mod plugin_preview;
 mod portal;
 mod profile;
@@ -26,26 +27,35 @@ use session::{PendingAction, Session};
 use workers::{PluginEvent, PluginRequest, PluginWorker};
 
 fn main() -> eframe::Result {
-    let argument = std::env::args_os().nth(1);
-    match argument.as_ref().and_then(|value| value.to_str()) {
-        Some("--version" | "-V") => {
+    let cli = launch::parse(std::env::args_os().skip(1).collect()).unwrap_or_else(|error| {
+        eprintln!("Diamond: {error}");
+        std::process::exit(1)
+    });
+    match cli.info {
+        Some(launch::Info::Version) => {
             println!("Diamond {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        Some("--syntax-licenses") => {
+        Some(launch::Info::Licenses) => {
             println!("{}", diamond_editor::syntax_licenses());
             return Ok(());
         }
-        Some("--help" | "-h") => {
+        Some(launch::Info::Help) => {
             println!(
-                "Diamond {}\nUsage: diamond [FOLDER | FILE]\n  FOLDER  Open or add a vault\n  FILE    Open one file without indexing its directory\n  --version  Print version\n  --syntax-licenses  Print bundled grammar acknowledgements",
+                "Diamond {}\nUsage: diamond [--foreground] [FOLDER | FILE]\n  FOLDER  Open or add a vault\n  FILE    Open one file without indexing its directory\n  --foreground  Stay attached to the terminal for diagnostics\n  --version  Print version\n  --syntax-licenses  Print bundled grammar acknowledgements",
                 env!("CARGO_PKG_VERSION")
             );
             return Ok(());
         }
-        _ => {}
+        None => {}
     }
-    let root = argument.map(|argument| expand_user_path(PathBuf::from(argument)));
+    if launch::detach(&cli).unwrap_or_else(|error| {
+        eprintln!("Diamond could not start: {error}");
+        std::process::exit(1)
+    }) {
+        return Ok(());
+    }
+    let root = cli.path.map(expand_user_path);
     let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty())
         || std::env::var_os("WAYLAND_SOCKET").is_some_and(|value| !value.is_empty());
     let override_ = std::env::var("DIAMOND_VSYNC").ok();
@@ -1007,7 +1017,11 @@ impl DiamondApp {
                             (Icon::Check, tr("Сохранено"))
                         };
                         let color = if !tab.is_dirty() && tab.autosave_error().is_none() {
-                            Color32::from_rgb(190, 224, 112)
+                            if ui.visuals().dark_mode {
+                                Color32::from_rgb(162, 242, 58)
+                            } else {
+                                Color32::from_rgb(72, 132, 0)
+                            }
                         } else {
                             colors.muted
                         };

@@ -260,3 +260,104 @@ of the previous form, constructor-symlink rejection and restoration after a fina
 verification failure. Source structure, Rust token/delimiter checks and Arch
 recipe shell syntax passed. The archive payload is byte-checked against sources.
 These checks are not Rust compilation or native interaction verification.
+
+
+## Arch 0.7.5-2 packaging correction
+
+The user's makepkg trace reached final linking, with unresolved
+ring_core_0_17_14__ native C/assembly symbols. A makepkg C/C++ LTO interaction is
+a likely cause, consistent with https://github.com/briansmith/ring/issues/1444;
+the exact CFLAGS were not printed, so this is not a confirmed reproduction.
+Both PKGBUILDs now disable makepkg LTO via !lto; the Cargo release ThinLTO profile
+is unchanged. The package release is 2, while source version remains 0.7.5.
+
+For recovery, clean only ring's release output and retry makepkg so stale native
+archives are not reused. Do not delete the complete target directory or install
+unrelated native crypto libraries. Shell syntax and recipe options were checked;
+Rust compilation and makepkg execution remain unrun here without those tools.
+
+
+## Arch 0.7.5-3 launcher icons
+
+Both recipes install io.diamond.Diamond.desktop to match the native Wayland app
+ID and use the matching icon name. Packaging renders the owner's root diamond.svg
+(or the bundled fallback) to eight PNG sizes with librsvg, installs scalable SVG,
+legacy icon-name aliases and pixmaps fallbacks. hicolor-icon-theme is a runtime
+lookup dependency; librsvg is a build dependency. No app runtime code changes.
+
+Three isolated package() staging tests passed: local root-SVG preference,
+local bundled-SVG fallback and archive recipe layout. Tests verify desktop/icon
+lookup consistency, permissions, all PNG dimensions, aliases, fallback files and
+SVG input selection. Their converter is an argument-validating PNG fixture writer;
+actual librsvg rendering is unrun because rsvg-convert is unavailable here.
+Shell syntax passed. Native makepkg/pacman installation and launcher display are
+not tested in this environment. Rust/Cargo remains unavailable.
+
+
+## 0.7.6 source update
+
+Added native Mermaid render/projection/fence/error/size tests and CLI argument
+checks for Unicode paths, literal -- paths, foreground mode and invalid arguments.
+Reviewed mermaid-rs-renderer v0.3.1 API/Cargo features, resvg v0.45.1 text/font
+features and safe rustix setsid before implementation. Dependencies are pinned
+where added; the Rust dependency graph has not been resolved here.
+
+Rust/Cargo is absent: formatting, compilation, workspace tests, clippy, actual
+Mermaid labels/layout, session acknowledgement, terminal hangup survival and
+native CPU behavior are not verified. Portable source and package staging tests
+are independent of native validation and do not substitute for it.
+
+Preparation results: all 20 updater tests and all three isolated package/icon
+staging tests passed. Source structure, Rust token/delimiter checks, Arch shell
+syntax and archive/payload byte comparisons passed. No native Rust test, terminal
+or Mermaid runtime result is claimed from those portable checks.
+
+
+## 0.7.7 corrections
+
+Soft and hard paragraph breaks share semantic/source-map newline handling, so
+adjacent bold lines with two-space or backslash breaks no longer fall back to
+raw text. Source bytes and Unicode/CRLF anchors remain unchanged.
+Search-match jumps no longer request editor focus. Direct document/object jumps
+still activate editing; typing, Enter and Shift+Enter keep the find field active.
+Find/replace uses two aligned grid rows: all find controls stay together and the
+Replace all button occupies their combined width. A horizontal scroll fallback
+handles unusually narrow editor widths. Saved uses saturated lime, with a darker
+variant for light-theme contrast.
+
+Rust regression cases cover break formats/source round trips, inactive projection
+and successive find-query letters/Enter in Live, Source and Hex. These cases are
+unrun without Rust/Cargo; native focus/geometry and compilation remain unverified.
+
+All 21 updater tests and three isolated package/icon staging tests passed.
+Source structure, Rust token/delimiter checks, shell syntax and archive/payload
+byte comparisons passed. These portable checks do not validate Rust types or UI.
+
+
+## 0.7.8 source responsiveness and Live boundary corrections
+
+The previous Source path re-highlighted the entire file synchronously on each
+text change. Markdown Enter additionally parsed a full Document for continuation.
+These are code-confirmed costs, not a measured attribution of the user's latency.
+Source highlighting now runs on one lazy, sleeping worker with line checkpoints,
+suffix-state convergence, cancellation/coalescing and revision-checked results.
+Source Undo uses bounded changed fragments rather than persistent full-text native
+snapshots. IME commit/cancel and explicit replacements share this history. Ordinary
+Enter uses a lightweight container helper and dirty checks avoid byte copies.
+
+Live text mutations retain unchanged Mermaid object geometry in the same layout
+pass. A single Backspace/Delete at a collapsed table/diagram/property boundary
+reveals source and preserves bytes; deliberate whole-object selection can delete
+it. Source language coverage is retained; LSP and Live fence highlighting have not
+been replaced. See SOURCE_PERFORMANCE.md for limits and diagnostic commands.
+
+Rust regression tests cover Unicode/CRLF undo, redo branching/IME/budgets,
+900-line incremental highlighting compared with a fresh parse, multiline state
+changes, source continuation, same-pass Mermaid height and table boundary safety.
+Cargo/rustc are absent: compilation, Rust tests, clippy/formatting, native input,
+CPU and timing measurements have not been run. No speedup percentage is claimed.
+
+Preparation results: 22 updater tests and three isolated package/icon staging
+tests passed. TOML/source-boundary checks, Rust lexical/delimiter checks, shell
+syntax and archive byte verification passed. No Rust type/borrow check or native
+regression test is implied by these portable results.

@@ -41,3 +41,12 @@ under its own font license. The updated diamond.svg is supplied by the project o
 - serde_yaml_ng 0.10.0 — MIT; https://github.com/acatton/serde-yaml-ng.
   YAML is parsed as data; custom YAML tags do not execute code. The dependency's
   own license and unsafe-libyaml dependency notices are supplied by Cargo.
+
+## 0.7.6 native diagrams
+
+- mermaid-rs-renderer 0.3.1 — MIT; https://github.com/1jehuang/mermaid-rs-renderer/tree/v0.3.1.
+  The complete notice is in assets/licenses/MERMAID-RS-RENDERER-MIT.txt and installed by both Arch recipes.
+  Used as a library with default CLI/PNG features disabled. Its dependency
+  notices are supplied by Cargo; no upstream browser/Node assets are bundled.
+- Existing resvg 0.45.1 now enables text/system-font support for diagram labels.
+  System fonts keep their own licenses; no additional font files are bundled.

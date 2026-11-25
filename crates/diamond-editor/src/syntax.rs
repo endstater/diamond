@@ -10,7 +10,7 @@ use syntect::{
     util::LinesWithEndings,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
     pub bytes: Range<usize>,
     pub scalars: Range<usize>,
@@ -56,41 +56,8 @@ pub fn spans(ctx: &Context, text: &str, language: &str, dark: bool) -> Arc<Vec<S
     }) {
         return hit;
     }
-    let syntaxes = SYNTAXES.get_or_init(two_face::syntax::extra_newlines);
-    let themes = THEMES.get_or_init(ThemeSet::load_defaults);
     let requested = language;
-    let language = language.split_whitespace().next().unwrap_or("txt");
-    let language = match language.to_ascii_lowercase().as_str() {
-        "js" => "javascript",
-        "jsx" => "jsx",
-        "ts" => "typescript",
-        "tsx" => "tsx",
-        "py" => "python",
-        "rs" => "rust",
-        "c++" | "cxx" | "cc" | "hpp" => "cpp",
-        "sh" | "zsh" | "shell" => "bash",
-        "yml" => "yaml",
-        "dockerfile" => "Dockerfile",
-        "makefile" => "Makefile",
-        _ => language,
-    };
-    let syntax = syntaxes
-        .find_syntax_by_name(language)
-        .or_else(|| syntaxes.find_syntax_by_token(language))
-        .or_else(|| syntaxes.find_syntax_by_extension(language))
-        .or_else(|| {
-            if matches!(language, "typescript" | "tsx" | "ts") {
-                syntaxes.find_syntax_by_extension("js")
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| syntaxes.find_syntax_plain_text());
-    let theme = &themes.themes[if dark {
-        "base16-ocean.dark"
-    } else {
-        "InspiredGitHub"
-    }];
+    let (syntaxes, theme, syntax) = grammar(language, dark);
     let mut highlighter = HighlightLines::new(syntax, theme);
     let mut spans = Vec::new();
     let mut byte = 0;
@@ -154,6 +121,93 @@ pub fn spans(ctx: &Context, text: &str, language: &str, dark: bool) -> Arc<Vec<S
     spans
 }
 
+pub(super) fn profiling() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("DIAMOND_PROFILE").is_some_and(|value| value == "1"))
+}
+pub(super) fn disabled() -> bool {
+    static DISABLED: OnceLock<bool> = OnceLock::new();
+    *DISABLED.get_or_init(|| std::env::var_os("DIAMOND_SYNTAX").is_some_and(|value| value == "0"))
+}
+
+pub(super) fn grammar(
+    language: &str,
+    dark: bool,
+) -> (
+    &'static SyntaxSet,
+    &'static syntect::highlighting::Theme,
+    &'static syntect::parsing::SyntaxReference,
+) {
+    let syntaxes = SYNTAXES.get_or_init(two_face::syntax::extra_newlines);
+    let themes = THEMES.get_or_init(ThemeSet::load_defaults);
+    let language = language.split_whitespace().next().unwrap_or("txt");
+    let language = match language.to_ascii_lowercase().as_str() {
+        "js" => "javascript",
+        "jsx" => "jsx",
+        "ts" => "typescript",
+        "tsx" => "tsx",
+        "py" => "python",
+        "rs" => "rust",
+        "c++" | "cxx" | "cc" | "hpp" => "cpp",
+        "sh" | "zsh" | "shell" => "bash",
+        "yml" => "yaml",
+        "dockerfile" => "Dockerfile",
+        "makefile" => "Makefile",
+        _ => language,
+    };
+    let syntax = syntaxes
+        .find_syntax_by_name(language)
+        .or_else(|| syntaxes.find_syntax_by_token(language))
+        .or_else(|| syntaxes.find_syntax_by_extension(language))
+        .or_else(|| {
+            if matches!(language, "typescript" | "tsx" | "ts") {
+                syntaxes.find_syntax_by_extension("js")
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| syntaxes.find_syntax_plain_text());
+    let theme = &themes.themes[if dark {
+        "base16-ocean.dark"
+    } else {
+        "InspiredGitHub"
+    }];
+    (syntaxes, theme, syntax)
+}
+
+pub(super) fn plain(text: &str, dark: bool) -> Vec<Span> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    vec![Span {
+        bytes: 0..text.len(),
+        scalars: 0..text.chars().count(),
+        color: if dark {
+            Color32::LIGHT_GRAY
+        } else {
+            Color32::DARK_GRAY
+        },
+        italic: false,
+        bold: false,
+        underline: false,
+    }]
+}
+pub(super) fn push_span(spans: &mut Vec<Span>, span: Span) {
+    if let Some(last) = spans.last_mut() {
+        if last.bytes.end == span.bytes.start
+            && last.color == span.color
+            && last.italic == span.italic
+            && last.bold == span.bold
+            && last.underline == span.underline
+        {
+            last.bytes.end = span.bytes.end;
+            last.scalars.end = span.scalars.end;
+            return;
+        }
+    }
+    spans.push(span);
+}
+
 pub fn layout(
     ctx: &Context,
     text: &str,
@@ -161,9 +215,14 @@ pub fn layout(
     size: f32,
     dark: bool,
 ) -> egui::text::LayoutJob {
+    layout_spans(text, size, &spans(ctx, text, language, dark))
+}
+fn layout_spans(text: &str, size: f32, spans: &[Span]) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     job.wrap.max_width = f32::INFINITY;
-    for span in spans(ctx, text, language, dark).iter() {
+    // Copy the text once, instead of appending it token by token.
+    job.text = text.into();
+    for span in spans {
         let mut format = egui::TextFormat::simple(egui::FontId::monospace(size), span.color);
         format.italics = span.italic;
         if span.bold {
@@ -172,7 +231,11 @@ pub fn layout(
         if span.underline {
             format.underline = egui::Stroke::new(1.0, span.color);
         }
-        job.append(&text[span.bytes.clone()], 0.0, format);
+        job.sections.push(egui::text::LayoutSection {
+            leading_space: 0.0,
+            byte_range: span.bytes.clone(),
+            format,
+        });
     }
     job
 }
@@ -220,13 +283,17 @@ mod extra_language_tests {
 
 /// One retained source galley per editor; no token/job reconstruction on redraw.
 #[derive(Default)]
-pub(super) struct LayoutCache(Option<CachedLayout>);
+pub(super) struct LayoutCache {
+    cached: Option<CachedLayout>,
+    syntax: super::source_syntax::Client,
+}
 struct CachedLayout {
     source: String,
     style: LayoutStyle,
     matches: Vec<Range<usize>>,
     active: Option<Range<usize>>,
     galley: Arc<egui::Galley>,
+    colors_revision: u64,
 }
 #[derive(PartialEq)]
 struct LayoutStyle {
@@ -270,15 +337,20 @@ impl LayoutCache {
             epoch: super::font_epoch(ui.ctx()),
             scale: ui.ctx().pixels_per_point().to_bits(),
         };
-        if let Some(hit) = self.0.as_ref().filter(|hit| {
-            hit.style == style
+        let (colors_revision, spans) =
+            self.syntax
+                .spans(ui.ctx(), text, options.language, style.dark);
+        if let Some(hit) = self.cached.as_ref().filter(|hit| {
+            hit.colors_revision == colors_revision
+                && hit.style == style
                 && hit.source == text
                 && hit.matches.as_slice() == options.matches
                 && hit.active.as_ref() == options.active
         }) {
             return Arc::clone(&hit.galley);
         }
-        let mut job = layout(ui.ctx(), text, options.language, options.size, style.dark);
+        let started = std::time::Instant::now();
+        let mut job = layout_spans(text, options.size, &spans);
         for section in &mut job.sections {
             section.format.font_id.family = options.family.clone();
         }
@@ -288,12 +360,21 @@ impl LayoutCache {
         super::emoji::decorate_job(ui.ctx(), &mut job);
         let job = super::search::highlight(job, options.matches, options.active, options.accent);
         let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        if profiling() {
+            eprintln!(
+                "[diamond source] layout_ms={:.3} bytes={} sections={}",
+                started.elapsed().as_secs_f64() * 1000.0,
+                text.len(),
+                galley.job.sections.len()
+            );
+        }
         // Large buffers retain the existing fallback, without another unbounded snapshot.
-        self.0 = (text.len() <= 2 * 1024 * 1024).then(|| CachedLayout {
+        self.cached = (text.len() <= 2 * 1024 * 1024).then(|| CachedLayout {
             source: text.to_owned(),
             style,
             matches: options.matches.to_vec(),
             active: options.active.cloned(),
+            colors_revision,
             galley: Arc::clone(&galley),
         });
         galley
@@ -311,7 +392,7 @@ mod layout_cache_tests {
         let _ = ctx.run(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let mut options = LayoutOptions {
-                    language: "rs",
+                    language: "txt",
                     size: 16.0,
                     width: 500.0,
                     wrap: true,

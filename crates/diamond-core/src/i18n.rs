@@ -14,6 +14,12 @@ pub enum Language {
 impl Language {
     pub fn text(self, key: &'static str) -> &'static str {
         let (en, ru, zh) = match key {
+            "Rendering diagram…" => ("Rendering diagram…", "Рендер диаграммы…", "正在绘制图表…"),
+            "Click to edit diagram source" => (
+                "Click to edit diagram source",
+                "Нажмите для редактирования кода диаграммы",
+                "点击编辑图表源码",
+            ),
             "Edit YAML: click" => (
                 "Click to edit YAML",
                 "Нажмите для редактирования YAML",
