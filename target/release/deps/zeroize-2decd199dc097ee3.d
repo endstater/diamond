@@ -1,0 +1,12 @@
+/home/endstater/diamond-0.1.0/target/release/deps/zeroize-2decd199dc097ee3.d: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/x86.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/barrier.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/bulk.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/stack.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/../README.md
+
+/home/endstater/diamond-0.1.0/target/release/deps/libzeroize-2decd199dc097ee3.rlib: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/x86.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/barrier.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/bulk.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/stack.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/../README.md
+
+/home/endstater/diamond-0.1.0/target/release/deps/libzeroize-2decd199dc097ee3.rmeta: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/x86.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/barrier.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/bulk.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/stack.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/../README.md
+
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/lib.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/x86.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/barrier.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/bulk.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/stack.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zeroize-1.9.2/src/../README.md:

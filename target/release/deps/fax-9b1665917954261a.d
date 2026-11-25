@@ -1,0 +1,12 @@
+/home/endstater/diamond-0.1.0/target/release/deps/fax-9b1665917954261a.d: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/maps.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/decoder.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/encoder.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/tiff.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/bitmaps.rs
+
+/home/endstater/diamond-0.1.0/target/release/deps/libfax-9b1665917954261a.rlib: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/maps.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/decoder.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/encoder.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/tiff.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/bitmaps.rs
+
+/home/endstater/diamond-0.1.0/target/release/deps/libfax-9b1665917954261a.rmeta: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/maps.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/decoder.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/encoder.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/tiff.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/bitmaps.rs
+
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/lib.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/maps.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/decoder.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/encoder.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/tiff.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fax-0.2.7/src/bitmaps.rs:

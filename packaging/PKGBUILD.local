@@ -1,7 +1,7 @@
 # Build an installable Arch package from the current checkout and its existing target cache.
 # Run: cd packaging && makepkg -si -p PKGBUILD.local
 pkgname=diamond
-pkgver=0.7.8
+pkgver=0.7.9
 pkgrel=1
 pkgdesc='Native Markdown workspace with process plugins and live editing'
 arch=('x86_64' 'aarch64')

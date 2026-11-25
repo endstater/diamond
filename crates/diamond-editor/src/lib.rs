@@ -1045,7 +1045,7 @@ impl EditorBuffer {
         egui::Frame::new()
             .fill(ui.visuals().faint_bg_color)
             .corner_radius(10)
-            .inner_margin(egui::Margin::same(8))
+            .inner_margin(egui::Margin::same(12))
             .show(ui, |ui| {
                 let query_id = egui::Id::new(("find-query", self.id));
                 if self.search.focus {
@@ -1062,17 +1062,17 @@ impl EditorBuffer {
                     })
                     .max(20.0)
                     + ui.spacing().button_padding.x * 2.0;
-                let spacing = ui.spacing().item_spacing.x;
+                let spacing = 12.0;
                 let controls_width = toggle_width * 2.0 + 32.0 * 3.0 + spacing * 4.0;
-                let input_width = (ui.available_width() - controls_width - spacing).max(40.0);
+                let input_width = (ui.available_width() - controls_width - spacing).max(180.0);
                 egui::ScrollArea::horizontal()
                     .id_salt(("find-controls-scroll", self.id))
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        egui::Grid::new(("find-rows", self.id))
-                            .num_columns(2)
-                            .spacing([spacing, 8.0])
-                            .show(ui, |ui| {
+                        ui.set_min_width(input_width + spacing + controls_width);
+                        ui.spacing_mut().item_spacing = egui::vec2(spacing, 10.0);
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
                                 // Consume Enter before the single-line field can surrender focus.
                                 if ui.memory(|memory| memory.has_focus(query_id)) {
                                     if ui.input_mut(|input| {
@@ -1085,16 +1085,20 @@ impl EditorBuffer {
                                         self.search.navigate(true);
                                     }
                                 }
-                                ui.add(
+                                let _query_response = ui.add(
                                     egui::TextEdit::singleline(&mut self.find)
                                         .hint_text(tr("Найти…"))
                                         .id(query_id)
-                                        .desired_width((input_width - 20.0).max(1.0))
-                                        .min_size(egui::vec2(0.0, 36.0))
-                                        .margin(egui::Margin::symmetric(10, 8)),
+                                        .desired_width((input_width - 24.0).max(1.0))
+                                        .min_size(egui::vec2(input_width, 40.0))
+                                        .margin(egui::Margin::symmetric(12, 10)),
                                 );
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(controls_width, 36.0),
+                                #[cfg(test)]
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(query_id.with("rect"), _query_response.rect)
+                                });
+                                let _controls_response = ui.allocate_ui_with_layout(
+                                    egui::vec2(controls_width, 40.0),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
                                         if ui
@@ -1153,29 +1157,52 @@ impl EditorBuffer {
                                         }
                                     },
                                 );
-                                ui.end_row();
-                                ui.add(
+                                #[cfg(test)]
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(
+                                        query_id.with("controls"),
+                                        _controls_response.response.rect,
+                                    )
+                                });
+                            });
+                            ui.horizontal(|ui| {
+                                let _replacement_response = ui.add(
                                     egui::TextEdit::singleline(&mut self.replacement)
                                         .hint_text(tr("Заменить на…"))
-                                        .desired_width((input_width - 20.0).max(1.0))
-                                        .min_size(egui::vec2(0.0, 36.0))
-                                        .margin(egui::Margin::symmetric(10, 8)),
+                                        .desired_width((input_width - 24.0).max(1.0))
+                                        .min_size(egui::vec2(input_width, 40.0))
+                                        .margin(egui::Margin::symmetric(12, 10)),
                                 );
-                                replace = ui
+                                #[cfg(test)]
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(
+                                        query_id.with("replacement"),
+                                        _replacement_response.rect,
+                                    )
+                                });
+                                let replace_response = ui
                                     .add_enabled_ui(
                                         !self.is_composing() && self.search.error.is_none(),
                                         |ui| {
                                             ui.add_sized(
-                                                [controls_width, 36.0],
+                                                [controls_width, 40.0],
                                                 egui::Button::new(tr("Заменить все")),
                                             )
                                         },
                                     )
-                                    .inner
-                                    .clicked();
-                                ui.end_row();
+                                    .inner;
+                                replace = replace_response.clicked();
+                                #[cfg(test)]
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(
+                                        query_id.with("replace-button"),
+                                        replace_response.rect,
+                                    )
+                                });
                             });
+                        });
                     });
+                ui.add_space(4.0);
                 let count = self.search.matches.len();
                 ui.label(format!(
                     "{}/{}",
@@ -1518,6 +1545,51 @@ mod find_focus_tests {
                 assert_eq!(buffer.find, wanted);
                 assert_eq!(buffer.bytes().unwrap(), before);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod find_layout_tests {
+    use super::*;
+    #[test]
+    fn query_and_replacement_keep_width_and_controls_stay_in_two_rows() {
+        for width in [320.0, 900.0, 1200.0] {
+            let ctx = egui::Context::default();
+            let mut buffer = EditorBuffer::from_bytes(b"note");
+            let query = egui::Id::new(("find-query", buffer.id));
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, 300.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        buffer.find_ui(ui, &mut EditorResponse::default());
+                    });
+                },
+            );
+            let rect = |key: &str| {
+                ctx.data(|data| data.get_temp::<egui::Rect>(query.with(key)))
+                    .unwrap()
+            };
+            let input = rect("rect");
+            let replacement = rect("replacement");
+            let controls = rect("controls");
+            let button = rect("replace-button");
+            assert!(input.width() >= 180.0);
+            if width >= 900.0 {
+                assert!(input.width() > width / 2.0);
+            }
+            assert!((input.width() - replacement.width()).abs() < 1.0);
+            assert!((input.left() - replacement.left()).abs() < 1.0);
+            assert!((controls.left() - button.left()).abs() < 1.0);
+            assert!((controls.width() - button.width()).abs() < 1.0);
+            assert!(input.right() < controls.left());
+            assert!(input.bottom() < replacement.top());
         }
     }
 }

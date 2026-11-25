@@ -3,12 +3,12 @@
 pkgname = diamond
 pkgbase = diamond
 xdata = pkgtype=pkg
-pkgver = 0.7.8-1
+pkgver = 0.7.9-1
 pkgdesc = Native Markdown workspace with process plugins and live editing
 url = https://github.com/endstater/diamond
-builddate = 1795608155
+builddate = 1795614894
 packager = Unknown Packager
-size = 28874805
+size = 28891705
 arch = x86_64
 license = GPL-3.0-only
 depend = gcc-libs

@@ -361,3 +361,28 @@ Preparation results: 22 updater tests and three isolated package/icon staging
 tests passed. TOML/source-boundary checks, Rust lexical/delimiter checks, shell
 syntax and archive byte verification passed. No Rust type/borrow check or native
 regression test is implied by these portable results.
+
+
+## 0.7.9 search layout and Markdown clipboard
+
+Find and replacement inputs have explicit 180-pixel minimum widths and use the
+remaining editor width outside grid column sizing. Two non-wrapping rows retain
+aligned inputs and control-group-width Replace all; padding/row gaps increase.
+The left-sidebar toggle is beside the logo on the left of the header.
+Live Copy uses source-preserving whole blocks and balanced semantic Markdown
+fragments for partial inline selections. Full-document Copy preserves original
+bytes, including CRLF. Code headers have a native copy-content control on the
+right; table exterior corners use a small radius while inner cell joins stay
+square. Copy operations do not change source or history.
+
+The repository adds compiled-output ignore patterns and a signature-based cleaner
+with preview as default and explicit --delete. Media/fonts, symlinks, Git internals,
+installed dependency folders and vaults are preserved. The updater does not run
+the cleaner. Rust compilation/native clipboard and geometry remain unverified
+without Cargo; portable cleanup tests pass independently of native validation.
+
+Preparation checks: 24 updater tests, three isolated package/icon staging tests
+and two compiled-file cleanup tests passed. Cleanup ran only against temporary
+fixtures in deletion mode; the actual source tree was inspected in preview mode.
+Source boundaries/TOML/Python/shell checks and archive byte verification passed.
+Rust focus/layout/clipboard regression tests were added but remain unrun.

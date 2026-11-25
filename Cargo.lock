@@ -610,7 +610,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "diamond-app"
-version = "0.7.8"
+version = "0.7.9"
 dependencies = [
  "ashpd",
  "base64",
@@ -632,7 +632,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-core"
-version = "0.7.8"
+version = "0.7.9"
 dependencies = [
  "regex",
  "serde",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-document"
-version = "0.7.8"
+version = "0.7.9"
 dependencies = [
  "pulldown-cmark",
  "serde_yaml_ng",
@@ -650,7 +650,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-editor"
-version = "0.7.8"
+version = "0.7.9"
 dependencies = [
  "diamond-core",
  "diamond-document",
@@ -680,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "diamond-vault"
-version = "0.7.8"
+version = "0.7.9"
 dependencies = [
  "diamond-document",
  "rustix 1.1.6",

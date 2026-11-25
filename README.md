@@ -56,6 +56,21 @@ See [properties and tags](docs/PROPERTIES.md) for editing and search.
 
 Alpha software. See [validation](docs/VALIDATION.md) and the [plugin API](docs/PLUGINS.md). PDF/Typst engines are not bundled; one plugin process is active at a time.
 
+## Clean build binaries
+
+Preview compiled files, then delete them explicitly:
+
+```sh
+python3 scripts/clean_binaries.py
+python3 scripts/clean_binaries.py --delete
+```
+
+The cleaner recognizes executable/library/object signatures, including files
+without extensions. It preserves images/fonts, skips symlinks, Git internals,
+installed dependency folders and `vaults/`. Deleting build artifacts requires a
+rebuild. `.gitignore` covers build output and binary package names; it does not
+untrack files already committed.
+
 ## License
 
 [GNU GPL v3 only](LICENSE) (`GPL-3.0-only`). Third-party components retain their [own licenses](THIRD_PARTY_LICENSES.md).

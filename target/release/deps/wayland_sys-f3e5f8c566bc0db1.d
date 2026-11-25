@@ -1,0 +1,11 @@
+/home/endstater/diamond-0.1.0/target/release/deps/wayland_sys-f3e5f8c566bc0db1.d: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/common.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/client.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/server.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/egl.rs
+
+/home/endstater/diamond-0.1.0/target/release/deps/libwayland_sys-f3e5f8c566bc0db1.rlib: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/common.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/client.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/server.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/egl.rs
+
+/home/endstater/diamond-0.1.0/target/release/deps/libwayland_sys-f3e5f8c566bc0db1.rmeta: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/common.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/client.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/server.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/egl.rs
+
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/lib.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/common.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/client.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/server.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-sys-0.31.11/src/egl.rs:

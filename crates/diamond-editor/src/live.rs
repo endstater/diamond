@@ -367,6 +367,71 @@ impl Projection {
         result
     }
 
+    fn copy_markdown(&self, document: &Document, selection: Range<usize>) -> String {
+        if selection.is_empty() {
+            return String::new();
+        }
+        if selection.start == 0 && selection.end >= self.scalar_len() {
+            return self.source.clone();
+        }
+        let source: Vec<char> = self.source.chars().collect();
+        let mut result = String::new();
+        let mut position = selection.start;
+        for block in self.blocks.iter().filter(|block| {
+            block.view_range.start < selection.end && block.view_range.end > selection.start
+        }) {
+            let start = selection.start.max(block.view_range.start);
+            let end = selection.end.min(block.view_range.end);
+            if position < start {
+                result.extend(source[self.source_at(position)..self.source_at(start)].iter());
+            }
+            if block.revealed {
+                result.extend(source[self.source_at(start)..self.source_at(end)].iter());
+            } else if block.table.is_some() || block.diagram || block.properties.is_some() {
+                result.extend(source[block.source_range.clone()].iter());
+            } else {
+                let text_start = start.max(block.content_start).min(block.content_end);
+                let text_end = end.min(block.content_end).max(text_start);
+                if text_start == block.content_start && text_end == block.content_end {
+                    let mut source_end = block.source_range.end;
+                    if end <= block.content_end {
+                        while source_end > block.source_range.start
+                            && matches!(source[source_end - 1], '\r' | '\n')
+                        {
+                            source_end -= 1;
+                        }
+                    }
+                    result.extend(source[block.source_range.start..source_end].iter());
+                } else if text_start < text_end {
+                    if let Some(fragment) = document.markdown_fragment(
+                        block.index,
+                        text_start - block.content_start..text_end - block.content_start,
+                    ) {
+                        result.push_str(&fragment);
+                    }
+                    if end > block.content_end {
+                        result.extend(
+                            source[self.source_at(block.content_end)..self.source_at(end)]
+                                .iter()
+                                .filter(|c| matches!(**c, '\r' | '\n')),
+                        );
+                    }
+                } else if end > block.content_end {
+                    result.extend(
+                        source[self.source_at(text_start)..self.source_at(end)]
+                            .iter()
+                            .filter(|c| matches!(**c, '\r' | '\n')),
+                    );
+                }
+            }
+            position = end;
+        }
+        if position < selection.end {
+            result.extend(source[self.source_at(position)..self.source_at(selection.end)].iter());
+        }
+        result
+    }
+
     fn inherit_geometry(&mut self, previous: &Projection) {
         for block in &mut self.blocks {
             if block.diagram && !block.revealed {
@@ -1222,6 +1287,21 @@ pub(super) fn show(
         native.store(ui.ctx(), id);
         state.reset_native_state = false;
     }
+    let copy_markdown = focused
+        && !state.composing
+        && ui.input_mut(|input| {
+            let copy = input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Copy));
+            if copy {
+                input
+                    .events
+                    .retain(|event| !matches!(event, egui::Event::Copy));
+            }
+            let shortcut = input.consume_key(Modifiers::COMMAND, Key::C);
+            copy || shortcut
+        });
     let before_selection = state.selection;
     let text = if rebuilt {
         initial.text.clone()
@@ -1307,6 +1387,17 @@ pub(super) fn show(
                     .translate(output.galley_pos.to_vec2());
                 ui.scroll_to_rect(rect, Some(egui::Align::Center));
             }
+            if copy_markdown && let Some(cursor) = output.cursor_range {
+                let start = cursor.primary.index.min(cursor.secondary.index);
+                let end = cursor.primary.index.max(cursor.secondary.index);
+                if start < end {
+                    ui.ctx().copy_text(
+                        projection
+                            .borrow()
+                            .copy_markdown(adapter.document, start..end),
+                    );
+                }
+            }
             super::emoji::paint(
                 ui,
                 &output.galley,
@@ -1349,6 +1440,7 @@ pub(super) fn show(
                 options,
                 &mut table_jump,
             );
+            paint_code_copy(ui, &output, &projection.borrow(), options);
             toggled = paint_decorations(
                 ui,
                 &output,
@@ -1957,6 +2049,29 @@ mod tests {
     }
 
     #[test]
+    fn live_copy_keeps_markdown_and_whole_document_bytes() {
+        let source = "# Title\r\n\r\n**你好🙂** and [link](https://example.com)\r\n\r\n- [ ] task\r\n\r\n| A | B |\r\n| --- | --- |\r\n| 1 | 2 |\r\n";
+        let document = Document::parse(source);
+        let projection = Projection::build(&document, None);
+        assert_eq!(
+            projection.copy_markdown(&document, 0..projection.scalar_len()),
+            source
+        );
+        for block in &projection.blocks {
+            let selected =
+                projection.copy_markdown(&document, block.content_start..block.content_end);
+            match block.kind {
+                BlockKind::Heading(_) => assert_eq!(selected, "# Title"),
+                BlockKind::Paragraph => assert!(selected.starts_with("**你好🙂**")),
+                BlockKind::Task(_) => assert_eq!(selected, "- [ ] task"),
+                BlockKind::Table => assert!(selected.contains("| --- | --- |")),
+                _ => {}
+            }
+        }
+        assert_eq!(document.to_markdown(), source);
+    }
+
+    #[test]
     fn code_heading_reserves_a_real_row_before_the_code_body() {
         let source = "Before\n\n```rust\nfn main() {}\n```\n";
         let document = Document::parse(source);
@@ -2279,9 +2394,31 @@ fn paint_tables(
                         let painter = ui
                             .painter()
                             .with_clip_rect(cell_rect.intersect(ui.clip_rect()));
+                        let corners = egui::CornerRadius {
+                            nw: if cell.row == 0 && cell.column == 0 {
+                                6
+                            } else {
+                                0
+                            },
+                            ne: if cell.row == 0 && cell.column + 1 == table.columns.len() {
+                                6
+                            } else {
+                                0
+                            },
+                            sw: if cell.row + 1 == rows && cell.column == 0 {
+                                6
+                            } else {
+                                0
+                            },
+                            se: if cell.row + 1 == rows && cell.column + 1 == table.columns.len() {
+                                6
+                            } else {
+                                0
+                            },
+                        };
                         painter.rect_filled(
                             cell_rect,
-                            0.0,
+                            corners,
                             if cell.row == 0 {
                                 ui.visuals().faint_bg_color
                             } else {
@@ -2290,7 +2427,7 @@ fn paint_tables(
                         );
                         painter.rect_stroke(
                             cell_rect,
-                            0.0,
+                            corners,
                             Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
                             egui::StrokeKind::Inside,
                         );
@@ -2710,6 +2847,79 @@ fn paint_properties(
         }
         if let Some(tag) = tag {
             *open_link = Some(format!("{}{tag}", diamond_document::tags::LINK_PREFIX));
+        }
+    }
+}
+
+fn paint_code_copy(
+    ui: &mut egui::Ui,
+    output: &egui::text_edit::TextEditOutput,
+    projection: &Projection,
+    options: &ViewOptions<'_>,
+) {
+    for block in &projection.blocks[visible_blocks(ui, output, projection)] {
+        if block.kind != BlockKind::Code {
+            continue;
+        }
+        let Some(header) = &block.header else {
+            continue;
+        };
+        let caret = output
+            .galley
+            .pos_from_cursor(CCursor::new(header.start))
+            .translate(output.galley_pos.to_vec2());
+        let rect = egui::Rect::from_center_size(
+            egui::pos2(output.response.rect.right() - 22.0, caret.center().y),
+            egui::vec2(30.0, caret.height().max(24.0)),
+        );
+        if !ui.is_rect_visible(rect) {
+            continue;
+        }
+        let response = ui
+            .interact(
+                rect,
+                output.response.id.with(("copy-code", block.index)),
+                egui::Sense::click(),
+            )
+            .on_hover_text(options.language.text("Copy code"))
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                true,
+                options.language.text("Copy code"),
+            )
+        });
+        let visuals = ui.style().interact(&response);
+        ui.painter().rect_filled(
+            rect,
+            6.0,
+            if response.hovered() {
+                visuals.bg_fill
+            } else {
+                ui.visuals().code_bg_color
+            },
+        );
+        let back = egui::Rect::from_center_size(
+            rect.center() + egui::vec2(-2.0, -2.0),
+            egui::vec2(11.0, 12.0),
+        );
+        let front = back.translate(egui::vec2(4.0, 4.0));
+        ui.painter()
+            .rect_stroke(back, 2.0, visuals.fg_stroke, egui::StrokeKind::Inside);
+        ui.painter().rect_filled(
+            front,
+            2.0,
+            if response.hovered() {
+                visuals.bg_fill
+            } else {
+                ui.visuals().code_bg_color
+            },
+        );
+        ui.painter()
+            .rect_stroke(front, 2.0, visuals.fg_stroke, egui::StrokeKind::Inside);
+        if response.clicked() {
+            ui.ctx().copy_text(block.text.clone());
         }
     }
 }

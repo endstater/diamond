@@ -879,6 +879,18 @@ impl DiamondApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
+                    if !self.light_mode
+                        && icons::selectable_button(
+                            ui,
+                            Icon::ArrowLeft,
+                            self.settings.show_sidebar,
+                            tr("Toggle left sidebar"),
+                        )
+                        .clicked()
+                    {
+                        self.settings.show_sidebar = !self.settings.show_sidebar;
+                        self.persist_settings();
+                    }
                     draw_icon(ui, Icon::Diamond, 28.0, colors.text);
                     ui.add_space(4.0);
                     ui.vertical(|ui| {
@@ -926,17 +938,6 @@ impl DiamondApp {
                         self.save_active(ctx);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icons::selectable_button(
-                            ui,
-                            Icon::ArrowLeft,
-                            self.settings.show_sidebar && !self.light_mode,
-                            tr("Toggle left sidebar"),
-                        )
-                        .clicked()
-                        {
-                            self.settings.show_sidebar = !self.settings.show_sidebar;
-                            self.persist_settings();
-                        }
                         if icons::selectable_button(
                             ui,
                             Icon::Sidebar,

@@ -1,0 +1,11 @@
+/home/endstater/diamond-0.1.0/target/release/deps/fdeflate-5fb91d92c6e24060.d: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/compress.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/decompress.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/huffman.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/tables.rs
+
+/home/endstater/diamond-0.1.0/target/release/deps/libfdeflate-5fb91d92c6e24060.rlib: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/compress.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/decompress.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/huffman.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/tables.rs
+
+/home/endstater/diamond-0.1.0/target/release/deps/libfdeflate-5fb91d92c6e24060.rmeta: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/compress.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/decompress.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/huffman.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/tables.rs
+
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/lib.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/compress.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/decompress.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/huffman.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/fdeflate-0.3.7/src/tables.rs:

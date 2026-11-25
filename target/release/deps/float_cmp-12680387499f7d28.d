@@ -1,0 +1,11 @@
+/home/endstater/diamond-0.1.0/target/release/deps/float_cmp-12680387499f7d28.d: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/macros.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/ulps.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/ulps_eq.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/eq.rs
+
+/home/endstater/diamond-0.1.0/target/release/deps/libfloat_cmp-12680387499f7d28.rlib: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/macros.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/ulps.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/ulps_eq.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/eq.rs
+
+/home/endstater/diamond-0.1.0/target/release/deps/libfloat_cmp-12680387499f7d28.rmeta: /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/lib.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/macros.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/ulps.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/ulps_eq.rs /home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/eq.rs
+
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/lib.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/macros.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/ulps.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/ulps_eq.rs:
+/home/endstater/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/float-cmp-0.9.0/src/eq.rs:

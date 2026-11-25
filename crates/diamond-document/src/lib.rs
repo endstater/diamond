@@ -12,6 +12,7 @@ static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use thiserror::Error;
 
+mod clipboard;
 mod source_map;
 mod structures;
 mod table_edit;

@@ -49,6 +49,7 @@ impl Language {
                 "编辑单元格源码",
             ),
             "Scroll speed" => ("Scroll speed", "Скорость прокрутки", "滚动速度"),
+            "Copy code" => ("Copy code", "Копировать код", "复制代码"),
             "Toggle left sidebar" => (
                 "Toggle left sidebar",
                 "Скрыть или показать левую панель",
