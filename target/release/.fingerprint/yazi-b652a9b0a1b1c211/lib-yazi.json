@@ -1,1 +1,0 @@
-{"rustc":12013579709055016942,"features":"[\"std\"]","declared_features":"[\"default\", \"std\"]","target":5507352189896084965,"profile":14800606212637756669,"path":13258393243604557547,"deps":[],"local":[{"CheckDepInfo":{"dep_info":"release/.fingerprint/yazi-b652a9b0a1b1c211/dep-lib-yazi","checksum":false}}],"rustflags":[],"config":2069994364910194474,"compile_kind":0}
