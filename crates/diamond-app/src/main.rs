@@ -41,9 +41,17 @@ fn main() -> eframe::Result {
             return Ok(());
         }
         Some(launch::Info::Help) => {
+            let command = std::env::current_exe()
+                .ok()
+                .and_then(|path| {
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                })
+                .unwrap_or_else(|| "diamond-notes".into());
             println!(
-                "Diamond {}\nUsage: diamond [--foreground] [FOLDER | FILE]\n  FOLDER  Open or add a vault\n  FILE    Open one file without indexing its directory\n  --foreground  Stay attached to the terminal for diagnostics\n  --version  Print version\n  --syntax-licenses  Print bundled grammar acknowledgements",
-                env!("CARGO_PKG_VERSION")
+                "Diamond {}\nUsage: {} [--foreground] [FOLDER | FILE]\n  FOLDER  Open or add a vault\n  FILE    Open one file without indexing its directory\n  --foreground  Stay attached to the terminal for diagnostics\n  --version  Print version\n  --syntax-licenses  Print bundled grammar acknowledgements",
+                env!("CARGO_PKG_VERSION"),
+                command
             );
             return Ok(());
         }
@@ -870,7 +878,7 @@ impl DiamondApp {
         let colors = theme::Palette::of(ctx);
         egui::TopBottomPanel::top("titlebar")
             .show_separator_line(false)
-            .exact_height((self.settings.ui_font_size.clamp(12.0, 24.0) * 3.4 + 16.0).max(64.0))
+            .exact_height((self.settings.ui_font_size.clamp(12.0, 24.0) * 1.8 + 20.0).max(54.0))
             .frame(
                 egui::Frame::new()
                     .fill(colors.panel)
@@ -879,32 +887,21 @@ impl DiamondApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
-                    if !self.light_mode
-                        && icons::selectable_button(
-                            ui,
-                            Icon::ArrowLeft,
-                            self.settings.show_sidebar,
-                            tr("Toggle left sidebar"),
-                        )
-                        .clicked()
-                    {
-                        self.settings.show_sidebar = !self.settings.show_sidebar;
-                        self.persist_settings();
-                    }
                     draw_icon(ui, Icon::Diamond, 28.0, colors.text);
                     ui.add_space(4.0);
-                    ui.vertical(|ui| {
-                        ui.label(
-                            RichText::new("Diamond")
-                                .strong()
-                                .size(theme::ui_size(ui, 17.0)),
-                        );
-                        ui.label(
-                            RichText::new(tr("Личное пространство"))
-                                .size(theme::ui_size(ui, 11.0))
-                                .color(colors.muted),
-                        );
-                    });
+                    let mut wordmark = egui::text::LayoutJob::simple(
+                        "DIAMOND".into(),
+                        egui::FontId::new(
+                            theme::ui_size(ui, 18.0),
+                            egui::FontFamily::Name("diamond-brand".into()),
+                        ),
+                        colors.text,
+                        f32::INFINITY,
+                    );
+                    for section in &mut wordmark.sections {
+                        section.format.extra_letter_spacing = 1.6;
+                    }
+                    ui.label(wordmark);
                     ui.add_space(20.0);
                     if icons::label_button(ui, Icon::Folder, tr("Открыть"))
                         .on_hover_text(tr("Открыть хранилище · Ctrl+O"))
@@ -938,7 +935,7 @@ impl DiamondApp {
                         self.save_active(ctx);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icons::selectable_button(
+                        if icons::sidebar_button(
                             ui,
                             Icon::Sidebar,
                             self.settings.show_inspector,
@@ -1056,6 +1053,18 @@ impl DiamondApp {
                     .inner_margin(egui::Margin::symmetric(16, 16)),
             )
             .show(ctx, |ui| {
+                if icons::sidebar_button(
+                    ui,
+                    Icon::ArrowLeft,
+                    self.settings.show_sidebar,
+                    tr("Toggle left sidebar"),
+                )
+                .clicked()
+                {
+                    self.settings.show_sidebar = !self.settings.show_sidebar;
+                    self.persist_settings();
+                }
+                ui.add_space(16.0);
                 for (panel, icon, tooltip) in [
                     (Panel::Vaults, Icon::Vaults, tr("Ваши хранилища")),
                     (Panel::Files, Icon::Folder, tr("Файлы")),
@@ -2152,14 +2161,7 @@ impl DiamondApp {
                                 .layout(egui::Layout::top_down(egui::Align::Min)),
                             |ui| {
                                 ui.set_min_height(rect.height());
-                                let family = if tab.editor.mode() != EditorMode::Formatted
-                                    && self.settings.editor_font == "sans"
-                                    && self.settings.editor_font_path.is_none()
-                                {
-                                    egui::FontFamily::Monospace
-                                } else {
-                                    theme::font_family(&self.settings)
-                                };
+                                let family = theme::font_family(&self.settings);
                                 tab.editor.set_language(self.settings.language);
                                 tab.editor.set_view_options(
                                     family,

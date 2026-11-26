@@ -386,3 +386,64 @@ and two compiled-file cleanup tests passed. Cleanup ran only against temporary
 fixtures in deletion mode; the actual source tree was inspected in preview mode.
 Source boundaries/TOML/Python/shell checks and archive byte verification passed.
 Rust focus/layout/clipboard regression tests were added but remain unrun.
+
+
+## 0.7.10 mixed Markdown clipboard boundaries
+
+Copy no longer uses right-affinity edit anchors as separator endpoints. Those
+anchors can lie after a hidden heading or code-fence opener, which duplicated
+markers when the next complete block was appended. Separators end at the next
+block's source start, revealed spans are clipped to their own source range, and
+a trailing separator excludes the next unselected block's hidden prefix.
+
+Regression cases select a mixed middle fragment (not the whole-document fast
+path), with two code fences/headings, LF/CRLF, Unicode and revealed blocks. The
+copied text is compared with original source and reparsed for block counts;
+additional cases cover a partial final heading and an unselected next heading.
+These Rust tests, compilation/fmt/clippy and native clipboard behavior remain
+unrun because Cargo/rustc are unavailable. No notes are rewritten or repaired by
+this update; copying is read-only.
+
+Preparation checks for 0.7.10: all 25 updater tests and all three isolated
+package/icon staging tests passed. Source/TOML/Python boundary checks, Rust
+lexical/delimiter checks, shell syntax and archive byte verification passed.
+No native Rust, clipboard or rendering result is claimed.
+
+
+## 0.7.11 fonts, header and Arch package identity
+
+UI/Live/Source font selectors include a focused text search inside the dropdown.
+Matching choices update on each letter; only selecting a face or pressing Enter
+commits a font. Search result indices are cached between query/list changes.
+Source exposes only Fontconfig MONO/CHARCELL faces and always uses the Monospace
+family, independently of the Live font. Preferences retain collection indices;
+missing fields in older settings default to built-in monospace for Source.
+
+Font families retain bundled fallback faces and add cached system fallback faces
+for box drawing, symbols, CJK, Arabic and Devanagari. Actual charset coverage is
+checked before adding each system face. Fontconfig discovery/file reads happen
+on font installation, not typing/layout. System fallbacks are cached once and
+bounded to 96 MiB; unsupported WOFF/WOFF2 paths are excluded. This is a finite
+family chain, not a guarantee of every Unicode glyph when no loaded face covers
+it. The Arch package includes Fontconfig/DejaVu; CJK/color fonts remain optional.
+
+The header now shows a tracked uppercase DIAMOND wordmark, with a dedicated bold
+system face when available and no Personal workspace subtitle. The diamond is
+back at the left corner. Left-panel toggle is at the top of the activity rail;
+both panel toggles use only gray colors in all hover/focus/open/pressed states.
+The SVG override tip is removed from settings and translations.
+
+Arch package and installed executable are diamond-notes; Cargo still builds
+ target/release/diamond. The launcher uses diamond-notes and the same stable app
+ID/icon. Generic diamond binary/icon paths are not installed, and no provides,
+replaces or conflicts claim is made against the unrelated diamond package.
+If an older package of this editor was installed under diamond, remove that old
+editor package before installing the renamed package; see packaging/README.md.
+Rust build/tests/native rendering and font-picker focus remain unverified here.
+
+Preparation checks for 0.7.11: all 26 updater tests and all three isolated
+package/icon staging tests passed, including the renamed executable/launcher and
+absence of /usr/bin/diamond. The Fontconfig smoke check selected a supported
+monospaced face whose actual charset includes U+2501; this is not a native glyph
+rendering test. Source/TOML/Python checks, Rust lexical/delimiter checks, shell
+syntax and archive byte verification passed. No native Rust result is claimed.

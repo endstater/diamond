@@ -1,14 +1,14 @@
-# Local source package. Place diamond-0.7.9.tar.gz beside this PKGBUILD.
-pkgname=diamond
-pkgver=0.7.9
+# Local source package. Place diamond-0.7.11.tar.gz beside this PKGBUILD.
+pkgname=diamond-notes
+pkgver=0.7.11
 pkgrel=1
 pkgdesc='Native Markdown notes and source editor built with Rust and egui'
 arch=('x86_64')
 license=('GPL-3.0-only')
-depends=('gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxkbcommon' 'wayland' 'mesa' 'hicolor-icon-theme')
+depends=('gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxkbcommon' 'wayland' 'mesa' 'hicolor-icon-theme' 'fontconfig' 'ttf-dejavu')
 makedepends=('rust' 'cargo' 'pkgconf' 'python' 'librsvg')
-optdepends=('xdg-desktop-portal: system file chooser' 'fontconfig: installed font selection' 'noto-fonts-cjk: Chinese glyphs' 'noto-fonts-emoji: color emoji' 'git: plugin installation from GitHub')
-source=("$pkgname-$pkgver.tar.gz")
+optdepends=('xdg-desktop-portal: system file chooser' 'noto-fonts-cjk: Chinese glyphs' 'noto-fonts-emoji: color emoji' 'git: plugin installation from GitHub')
+source=("diamond-$pkgver.tar.gz")
 # This local archive is created by its owner, not downloaded from a release.
 # Replace SKIP with the result of updpkgsums when distributing the package.
 sha256sums=('SKIP')
@@ -16,7 +16,7 @@ sha256sums=('SKIP')
 options=('!lto')
 
 prepare() {
-    cd "$srcdir/$pkgname-$pkgver"
+    cd "$srcdir/diamond-$pkgver"
     if [[ ! -f Cargo.lock ]]; then
         cargo generate-lockfile
     fi
@@ -29,18 +29,18 @@ prepare() {
 }
 
 build() {
-    cd "$srcdir/$pkgname-$pkgver"
+    cd "$srcdir/diamond-$pkgver"
     cargo build --release --frozen --package diamond-app
 }
 
 check() {
-    cd "$srcdir/$pkgname-$pkgver"
+    cd "$srcdir/diamond-$pkgver"
     ./scripts/check.sh
 }
 
 package() {
-    cd "$srcdir/$pkgname-$pkgver"
-    install -Dm755 target/release/diamond "$pkgdir/usr/bin/diamond"
+    cd "$srcdir/diamond-$pkgver"
+    install -Dm755 target/release/diamond "$pkgdir/usr/bin/diamond-notes"
     install -Dm644 packaging/diamond.desktop "$pkgdir/usr/share/applications/io.diamond.Diamond.desktop"
     local diamond_icon=assets/diamond.svg
     if [[ -f diamond.svg ]]; then diamond_icon=diamond.svg; fi

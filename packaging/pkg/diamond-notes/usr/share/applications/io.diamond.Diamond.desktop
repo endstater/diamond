@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=DIAMOND
+Comment=Native Markdown notes and source editor
+Comment[ru]=Нативный редактор заметок Markdown и исходного кода
+Exec=diamond-notes %f
+Icon=io.diamond.Diamond
+Terminal=false
+Categories=Office;TextEditor;Development;
+StartupNotify=true
+MimeType=text/markdown;text/plain;
+Keywords=Markdown;Notes;Typst;Editor;

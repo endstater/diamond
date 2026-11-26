@@ -16,12 +16,12 @@ makepkg -si -p PKGBUILD.local
 пользователем; makepkg запросит sudo для зависимостей и установки через pacman.
 Cargo может обновить Cargo.lock и загрузить новые зависимости.
 
-Устанавливаются `/usr/bin/diamond`, ярлык
+Устанавливаются `/usr/bin/diamond-notes`, ярлык
 `/usr/share/applications/io.diamond.Diamond.desktop`, SVG и PNG-иконки, лицензии
 и README. Идентификатор ярлыка и иконки совпадает с app ID окна в Wayland.
 Иконка берётся из `diamond.svg` в корне проекта, а если его нет — из
 `assets/diamond.svg`. PNG создаются при упаковке в размерах 16, 24, 32, 48, 64,
-128, 256 и 512 пикселей. Устанавливаются имена `io.diamond.Diamond` и `diamond`
+128, 256 и 512 пикселей. Устанавливаются имена `io.diamond.Diamond` и `diamond-notes`
 в hicolor, плюс PNG в `/usr/share/pixmaps` для совместимости. Зависимость
 `hicolor-icon-theme` обеспечивает базовую тему поиска иконок на минимальной
 системе. Конвертер нужен только при сборке; приложение не конвертирует иконки
@@ -37,8 +37,8 @@ Cargo может обновить Cargo.lock и загрузить новые з
 
 ## Из отдельного архива исходников
 
-Обычный `PKGBUILD` предназначен для полного архива `diamond-0.7.6.tar.gz` с корнем
-`diamond-0.7.6/`, лежащего рядом с ним. Это иной архив, не обновление `-files`.
+Обычный `PKGBUILD` предназначен для полного архива `diamond-0.7.11.tar.gz` с корнем
+`diamond-0.7.11/`, лежащего рядом с ним. Это иной архив, не обновление `-files`.
 Для него `makepkg -si` сначала подготавливает зависимости и запускает check().
 Перед распространением замените SKIP настоящей SHA256 через updpkgsums.
 Эти рецепты не означают публикацию в AUR или официальный репозиторий Arch.
@@ -54,3 +54,24 @@ Rust-исходники в этом исправлении не меняются
 0.7.6 launches independently from the terminal by default. Use `diamond --foreground .`
 for direct logs, or inspect `~/.local/state/diamond/diamond.log` after a detached
 launch. Mermaid is native Rust and requires no additional runtime browser/Node.
+
+
+## Новое имя пакета
+
+Пакет и установленная команда называются `diamond-notes`, чтобы не занимать имя
+другого пакета/исполняемого файла `diamond`. Из checkout по-прежнему собирается
+`target/release/diamond`. Ярлык запускает `diamond-notes %f` с тем же app ID.
+Если ранее устанавливали именно этот редактор как пакет `diamond`, удалите старый
+пакет перед установкой нового: они содержат один и тот же ярлык/иконки приложения.
+Другой пакет `diamond` не заменяется и не объявляется конфликтующим.
+
+После успешной сборки новой версии можно определить прежний пакет редактора по
+его уникальному ярлыку (пакет другого приложения не затрагивается):
+
+```sh
+if [ "$(pacman -Qqo /usr/share/applications/io.diamond.Diamond.desktop 2>/dev/null)" = diamond ]; then
+    sudo pacman -R diamond
+fi
+```
+
+Затем устанавливайте `diamond-notes`. Папки хранилищ и настройки при этом не удаляются.

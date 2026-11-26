@@ -152,3 +152,25 @@ with preview as default and explicit --delete. Media/fonts, symlinks, Git intern
 installed dependency folders and vaults are preserved. The updater does not run
 the cleaner. Rust compilation/native clipboard and geometry remain unverified
 without Cargo; portable cleanup tests pass independently of native validation.
+
+
+## 0.7.10 mixed Markdown clipboard boundaries
+
+Copy no longer uses right-affinity edit anchors as separator endpoints. Those
+anchors can lie after a hidden heading or code-fence opener, which duplicated
+markers when the next complete block was appended. Separators end at the next
+block's source start, revealed spans are clipped to their own source range, and
+a trailing separator excludes the next unselected block's hidden prefix.
+
+Regression cases select a mixed middle fragment (not the whole-document fast
+path), with two code fences/headings, LF/CRLF, Unicode and revealed blocks. The
+copied text is compared with original source and reparsed for block counts;
+additional cases cover a partial final heading and an unselected next heading.
+These Rust tests, compilation/fmt/clippy and native clipboard behavior remain
+unrun because Cargo/rustc are unavailable. No notes are rewritten or repaired by
+this update; copying is read-only.
+
+0.7.11 always uses FontFamily::Monospace for Source/Hex, even when the host's Live
+family is proportional. The desktop maps the selected validated Source font into
+the Monospace family, with bundled/system glyph fallbacks. Source syntax layout
+and retained galley keys continue to include the font epoch.

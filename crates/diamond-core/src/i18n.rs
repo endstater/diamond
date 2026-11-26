@@ -49,6 +49,22 @@ impl Language {
                 "编辑单元格源码",
             ),
             "Scroll speed" => ("Scroll speed", "Скорость прокрутки", "滚动速度"),
+            "Source font" => (
+                "Source font (monospace)",
+                "Шрифт Source (моноширинный)",
+                "源代码字体（等宽）",
+            ),
+            "Search fonts…" => ("Search fonts…", "Название шрифта…", "搜索字体…"),
+            "No matching fonts" => (
+                "No matching fonts",
+                "Подходящие шрифты не найдены",
+                "没有匹配的字体",
+            ),
+            "Source font must be monospaced; using the default font." => (
+                "Source font must be monospaced; using the default font.",
+                "Для Source нужен моноширинный шрифт; используется стандартный.",
+                "源代码需要等宽字体；正在使用默认字体。",
+            ),
             "Copy code" => ("Copy code", "Копировать код", "复制代码"),
             "Toggle left sidebar" => (
                 "Toggle left sidebar",
@@ -161,13 +177,6 @@ impl Language {
                     "实时 Markdown 自动保存。查找：Ctrl+F；搜索仓库：Ctrl+Shift+F；Esc 关闭查找。",
                 )
             }
-            "Иконка: diamond.svg рядом с Cargo.toml или исполняемым файлом. Приложение подхватит её при следующем запуске." => {
-                (
-                    "Your SVG is bundled. To override it, place diamond.svg beside the executable and restart.",
-                    "Иконка: diamond.svg рядом с Cargo.toml или исполняемым файлом. Приложение подхватит её при следующем запуске.",
-                    "已内置自定义 SVG。将 diamond.svg 放在程序旁并重启即可替换图标。",
-                )
-            }
             "Сбросить настройки внешнего вида" => (
                 "Reset appearance settings",
                 "Сбросить настройки внешнего вида",
@@ -252,9 +261,6 @@ impl Language {
                 )
             }
             "Команды" => ("Commands", "Команды", "命令"),
-            "Личное пространство" => {
-                ("Personal workspace", "Личное пространство", "个人工作空间")
-            }
             "Локальные файлы" => ("Local files", "Локальные файлы", "本地文件"),
             "Любой язык · JSON по stdio" => (
                 "Any language · JSON over stdio",

@@ -377,16 +377,28 @@ impl Projection {
         let source: Vec<char> = self.source.chars().collect();
         let mut result = String::new();
         let mut position = selection.start;
+        let mut copied_through = 0;
         for block in self.blocks.iter().filter(|block| {
             block.view_range.start < selection.end && block.view_range.end > selection.start
         }) {
             let start = selection.start.max(block.view_range.start);
             let end = selection.end.min(block.view_range.end);
             if position < start {
-                result.extend(source[self.source_at(position)..self.source_at(start)].iter());
+                // Editing anchors have right affinity and may point past the next
+                // heading/fence prefix. A separator belongs only to the source
+                // interval BEFORE that block, never to its hidden markers.
+                let gap_start = self.source_at(position).max(copied_through);
+                let gap_end = block.source_range.start;
+                if gap_start < gap_end {
+                    result.extend(source[gap_start..gap_end].iter());
+                }
             }
             if block.revealed {
-                result.extend(source[self.source_at(start)..self.source_at(end)].iter());
+                let source_start = self.source_at(start).max(block.source_range.start);
+                let source_end = self.source_at(end).min(block.source_range.end);
+                if source_start < source_end {
+                    result.extend(source[source_start..source_end].iter());
+                }
             } else if block.table.is_some() || block.diagram || block.properties.is_some() {
                 result.extend(source[block.source_range.clone()].iter());
             } else {
@@ -425,9 +437,21 @@ impl Projection {
                 }
             }
             position = end;
+            copied_through = block.source_range.end;
         }
         if position < selection.end {
-            result.extend(source[self.source_at(position)..self.source_at(selection.end)].iter());
+            let start = self.source_at(position).max(copied_through);
+            let end = self
+                .blocks
+                .iter()
+                .find(|block| block.view_range.start == selection.end)
+                .map_or_else(
+                    || self.source_at(selection.end),
+                    |block| block.source_range.start,
+                );
+            if start < end {
+                result.extend(source[start..end].iter());
+            }
         }
         result
     }
@@ -2069,6 +2093,121 @@ mod tests {
             }
         }
         assert_eq!(document.to_markdown(), source);
+    }
+
+    #[test]
+    fn copying_mixed_blocks_does_not_duplicate_hidden_heading_or_fence_prefixes() {
+        let input = "Intro\n\n### 3.2. Start server\n\nConnect to the server:\n\n```sh\nssh -p 2222 example\n```\n\nInside SSH:\n\n```sh\nexport JAVA_HOME=/usr/local/openjdk17\n```\n\n### 3.3. Tunnel\n\nDone 你好🙂\n\nFooter\n";
+        for eol in ["\n", "\r\n"] {
+            let source = input.replace('\n', eol);
+            let document = Document::parse(&source);
+            let start_byte = source.find("### 3.2.").unwrap();
+            let end_byte = source.find("Done 你好🙂").unwrap() + "Done 你好🙂".len();
+            let first = Projection::build(&document, None);
+            let reveals = [
+                None,
+                first
+                    .blocks
+                    .iter()
+                    .find(|b| b.kind == BlockKind::Code)
+                    .map(|b| b.source_range.clone()),
+                first
+                    .blocks
+                    .iter()
+                    .find(|b| matches!(b.kind, BlockKind::Heading(_)))
+                    .map(|b| b.source_range.clone()),
+                first
+                    .blocks
+                    .iter()
+                    .find(|b| b.text == "Done 你好🙂")
+                    .map(|b| b.source_range.clone()),
+            ];
+            for reveal in reveals {
+                let projection = Projection::build(&document, reveal.as_ref());
+                let start = projection
+                    .blocks
+                    .iter()
+                    .find(|b| b.text == "3.2. Start server")
+                    .unwrap()
+                    .content_start;
+                let end = projection
+                    .blocks
+                    .iter()
+                    .find(|b| b.text == "Done 你好🙂")
+                    .unwrap()
+                    .content_end;
+                let copied = projection.copy_markdown(&document, start..end);
+                assert_eq!(
+                    copied,
+                    &source[start_byte..end_byte],
+                    "reveal={reveal:?}, eol={eol:?}"
+                );
+                let reparsed = Document::parse(&copied);
+                assert_eq!(
+                    reparsed
+                        .blocks()
+                        .iter()
+                        .filter(|b| b.kind == BlockKind::Code)
+                        .count(),
+                    2
+                );
+                assert_eq!(
+                    reparsed
+                        .blocks()
+                        .iter()
+                        .filter(|b| matches!(b.kind, BlockKind::Heading(3)))
+                        .count(),
+                    2
+                );
+                assert_eq!(document.to_markdown(), source);
+            }
+        }
+    }
+
+    #[test]
+    fn copy_ending_before_a_heading_excludes_its_hidden_prefix() {
+        let source = "Intro\n\n```sh\necho hello\n```\n\nText\n\n### Following heading\n\nFooter\n";
+        let document = Document::parse(source);
+        let projection = Projection::build(&document, None);
+        let start = projection
+            .blocks
+            .iter()
+            .find(|b| b.kind == BlockKind::Code)
+            .unwrap()
+            .view_range
+            .start;
+        let end = projection
+            .blocks
+            .iter()
+            .find(|b| matches!(b.kind, BlockKind::Heading(_)))
+            .unwrap()
+            .view_range
+            .start;
+        let expected =
+            &source[source.find("```sh").unwrap()..source.find("### Following").unwrap()];
+        assert_eq!(projection.copy_markdown(&document, start..end), expected);
+    }
+
+    #[test]
+    fn partial_heading_copy_adds_its_prefix_once_after_another_block() {
+        let source = "Intro\n\nText\n\n### Following heading\n\nFooter\n";
+        let document = Document::parse(source);
+        let projection = Projection::build(&document, None);
+        let start = projection
+            .blocks
+            .iter()
+            .find(|b| b.text == "Text")
+            .unwrap()
+            .content_start;
+        let heading = projection
+            .blocks
+            .iter()
+            .find(|b| matches!(b.kind, BlockKind::Heading(_)))
+            .unwrap();
+        assert_eq!(
+            projection.copy_markdown(&document, start..heading.content_start + 9),
+            "Text\n\n### Following"
+        );
     }
 
     #[test]

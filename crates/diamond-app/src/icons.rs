@@ -275,6 +275,50 @@ pub fn selectable_button(ui: &mut Ui, icon: Icon, selected: bool, tooltip: &str)
     icon_button(ui, icon, selected, tooltip, 32.0)
 }
 
+/// Sidebar toggles remain neutral in every pointer/focus/open state.
+pub fn sidebar_button(ui: &mut Ui, icon: Icon, open: bool, tooltip: &str) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip)
+    });
+    let dark = ui.visuals().dark_mode;
+    let gray = |a, b| Color32::from_gray(if dark { a } else { b });
+    if ui.is_rect_visible(rect) {
+        if open || response.hovered() || response.is_pointer_button_down_on() {
+            ui.painter().rect_filled(
+                rect,
+                10.0,
+                if response.is_pointer_button_down_on() {
+                    gray(54, 209)
+                } else if response.hovered() {
+                    gray(43, 223)
+                } else {
+                    gray(31, 235)
+                },
+            );
+        }
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                rect.shrink(0.5),
+                10.0,
+                egui::Stroke::new(1.0, gray(130, 100)),
+                StrokeKind::Inside,
+            );
+        }
+        paint(
+            ui.painter(),
+            Rect::from_center_size(rect.center(), Vec2::splat(ICON_SIZE)),
+            icon,
+            if open || response.hovered() {
+                gray(242, 25)
+            } else {
+                gray(170, 90)
+            },
+        );
+    }
+    response.on_hover_text(tooltip)
+}
+
 fn icon_button(ui: &mut Ui, icon: Icon, selected: bool, tooltip: &str, edge: f32) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(edge), Sense::click());
     response.widget_info(|| {

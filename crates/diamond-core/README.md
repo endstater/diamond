@@ -13,3 +13,7 @@ pastel rainbow accent defaults and localized plugin/table/image controls.
 
 0.7.2 color::parse_hex validates six ASCII hexadecimal digits (optional #) for
 the appearance picker; incomplete, non-ASCII and invalid values are rejected.
+
+0.7.11 adds independent `code_font`, `code_font_path`, `code_font_index` preferences
+and collection-face indices for UI/Live fonts. Older JSON gains built-in Source
+monospace without changing existing UI/Live choices.

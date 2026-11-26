@@ -42,12 +42,12 @@ cd packaging
 makepkg -si -p PKGBUILD.local
 ```
 
-Then open a vault or a single file:
+The Arch package and installed command are `diamond-notes`. Open a vault or a single file:
 
 ```sh
-diamond .
-diamond ~/vault_1
-diamond ~/notes/idea.md
+diamond-notes .
+diamond-notes ~/vault_1
+diamond-notes ~/notes/idea.md
 ```
 
 Color emoji need a system color font, such as `noto-fonts-emoji`.

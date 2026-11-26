@@ -1,13 +1,13 @@
 # Build an installable Arch package from the current checkout and its existing target cache.
 # Run: cd packaging && makepkg -si -p PKGBUILD.local
-pkgname=diamond
-pkgver=0.7.9
+pkgname=diamond-notes
+pkgver=0.7.11
 pkgrel=1
 pkgdesc='Native Markdown workspace with process plugins and live editing'
 arch=('x86_64' 'aarch64')
 url='https://github.com/endstater/diamond'
 license=('GPL-3.0-only')
-depends=('gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxkbcommon' 'wayland' 'mesa' 'fontconfig' 'hicolor-icon-theme')
+depends=('gcc-libs' 'glibc' 'libx11' 'libxcb' 'libxkbcommon' 'wayland' 'mesa' 'fontconfig' 'hicolor-icon-theme' 'ttf-dejavu')
 makedepends=('rust' 'cargo' 'pkgconf' 'librsvg')
 optdepends=('git: install plugins from GitHub' 'python: Python plugins' 'xdg-desktop-portal: file and folder chooser' 'noto-fonts-cjk: Chinese text' 'noto-fonts-emoji: native color emoji' 'ttf-montserrat: Montserrat font')
 # makepkg's C/C++ LTO flags break ring's native archive at Rust link time.
@@ -27,7 +27,7 @@ package() {
     local diamond_checkout
     diamond_checkout="$(realpath "$startdir/..")"
     cd "$diamond_checkout"
-    install -Dm755 target/release/diamond "$pkgdir/usr/bin/diamond"
+    install -Dm755 target/release/diamond "$pkgdir/usr/bin/diamond-notes"
     install -Dm644 packaging/diamond.desktop "$pkgdir/usr/share/applications/io.diamond.Diamond.desktop"
     local diamond_icon=assets/diamond.svg
     if [[ -f diamond.svg ]]; then diamond_icon=diamond.svg; fi

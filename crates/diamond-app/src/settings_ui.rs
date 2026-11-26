@@ -14,8 +14,13 @@ pub fn show(ui: &mut egui::Ui, settings: &mut AppSettings, fonts: &[SystemFont])
     let before = (
         settings.editor_font.clone(),
         settings.editor_font_path.clone(),
+        settings.editor_font_index,
         settings.ui_font.clone(),
         settings.ui_font_path.clone(),
+        settings.ui_font_index,
+        settings.code_font.clone(),
+        settings.code_font_path.clone(),
+        settings.code_font_index,
         settings.language,
     );
     let mut changed = false;
@@ -35,18 +40,7 @@ pub fn show(ui: &mut egui::Ui, settings: &mut AppSettings, fonts: &[SystemFont])
                     }
                 });ui.end_row();
             ui.label(tr("Interface font"));
-            egui::ComboBox::from_id_salt("ui-font").width(280.0)
-                .selected_text(if settings.ui_font == "sans" {tr("По умолчанию")} else {&settings.ui_font})
-                .show_ui(ui,|ui|{
-                    if ui.selectable_label(settings.ui_font_path.is_none(),tr("По умолчанию")).clicked() {
-                        settings.ui_font="sans".into();settings.ui_font_path=None;changed=true;
-                    }
-                    for font in fonts {
-                        if ui.selectable_label(settings.ui_font_path.as_ref()==Some(&font.path),&font.name).clicked() {
-                            settings.ui_font=font.name.clone();settings.ui_font_path=Some(font.path.clone());changed=true;
-                        }
-                    }
-                });ui.end_row();
+            changed|=font_picker(ui,"ui-font",FontChoice{name:&mut settings.ui_font,path:&mut settings.ui_font_path,index:&mut settings.ui_font_index},fonts,FontKind::Interface,lang);ui.end_row();
             ui.label(tr("Interface text size"));
             changed |= committed_slider(ui, "ui_font_size", &mut settings.ui_font_size, 12.0..=24.0);ui.end_row();
             ui.label(tr("Тема"));
@@ -75,20 +69,9 @@ pub fn show(ui: &mut egui::Ui, settings: &mut AppSettings, fonts: &[SystemFont])
                 }
             });ui.end_row();
             ui.label(tr("Шрифт редактора"));
-            egui::ComboBox::from_id_salt("editor_font_choice").width(280.0).selected_text(
-                if settings.editor_font=="sans"{tr("По умолчанию")}else if settings.editor_font=="mono"{tr("Моноширинный")}else{&settings.editor_font}
-            ).show_ui(ui,|ui|{
-                for (key,title) in [("sans",tr("По умолчанию")),("mono",tr("Моноширинный"))]{
-                    if ui.selectable_label(settings.editor_font==key,title).clicked(){
-                        settings.editor_font=key.into();settings.editor_font_path=None;changed=true;
-                    }
-                }
-                for font in fonts {
-                    if ui.selectable_label(settings.editor_font_path.as_ref()==Some(&font.path),&font.name).clicked(){
-                        settings.editor_font=font.name.clone();settings.editor_font_path=Some(font.path.clone());changed=true;
-                    }
-                }
-            });ui.end_row();
+            changed|=font_picker(ui,"editor-font",FontChoice{name:&mut settings.editor_font,path:&mut settings.editor_font_path,index:&mut settings.editor_font_index},fonts,FontKind::Editor,lang);ui.end_row();
+            ui.label(tr("Source font"));
+            changed|=font_picker(ui,"source-font",FontChoice{name:&mut settings.code_font,path:&mut settings.code_font_path,index:&mut settings.code_font_index},fonts,FontKind::Source,lang);ui.end_row();
             ui.label(tr("Размер текста Markdown"));
             changed|=committed_slider(ui, "editor_font_size", &mut settings.editor_font_size, 12.0..=30.0);ui.end_row();
             ui.label(tr("Размер исходного кода"));
@@ -105,8 +88,6 @@ pub fn show(ui: &mut egui::Ui, settings: &mut AppSettings, fonts: &[SystemFont])
         changed|=ui.checkbox(&mut settings.reduced_motion,tr("Уменьшить анимацию")).changed();
         ui.add_space(24.0);
         ui.label(tr("Markdown в режиме Live сохраняется автоматически. Поиск: Ctrl+F; поиск по хранилищу: Ctrl+Shift+F; Esc закрывает поиск."));
-        ui.add_space(16.0);
-        ui.label(tr("Иконка: diamond.svg рядом с Cargo.toml или исполняемым файлом. Приложение подхватит её при следующем запуске."));
         ui.add_space(24.0);
         if ui.button(tr("Сбросить настройки внешнего вида")).clicked(){reset=true;}
         ui.add_space(20.0);ui.small(format!("Diamond {} · GPL-3.0-only · Lucide Icons (ISC / MIT)",env!("CARGO_PKG_VERSION")));
@@ -122,11 +103,175 @@ pub fn show(ui: &mut egui::Ui, settings: &mut AppSettings, fonts: &[SystemFont])
             != (
                 settings.editor_font.clone(),
                 settings.editor_font_path.clone(),
+                settings.editor_font_index,
                 settings.ui_font.clone(),
                 settings.ui_font_path.clone(),
+                settings.ui_font_index,
+                settings.code_font.clone(),
+                settings.code_font_path.clone(),
+                settings.code_font_index,
                 settings.language,
             ),
         reset,
+    }
+}
+
+struct FontChoice<'a> {
+    name: &'a mut String,
+    path: &'a mut Option<std::path::PathBuf>,
+    index: &'a mut u32,
+}
+#[derive(Clone, Copy, PartialEq)]
+enum FontKind {
+    Interface,
+    Editor,
+    Source,
+}
+#[derive(Clone, Default)]
+struct FontSearch {
+    query: String,
+    open: bool,
+    cached_query: String,
+    font_count: usize,
+    matches: std::sync::Arc<Vec<usize>>,
+}
+fn font_matches(fonts: &[SystemFont], query: &str, mono: bool) -> Vec<usize> {
+    let query = query.trim().to_lowercase();
+    let terms: Vec<_> = query.split_whitespace().collect();
+    let mut result: Vec<_> = fonts
+        .iter()
+        .enumerate()
+        .filter(|(_, font)| {
+            (!mono || font.monospace)
+                && terms
+                    .iter()
+                    .all(|term| font.name.to_lowercase().contains(*term))
+        })
+        .map(|(i, _)| i)
+        .collect();
+    result.sort_by_key(|&i| {
+        let name = fonts[i].name.to_lowercase();
+        (!name.starts_with(&query), !name.contains("regular"), name)
+    });
+    result
+}
+fn font_picker(
+    ui: &mut egui::Ui,
+    key: &str,
+    choice: FontChoice<'_>,
+    fonts: &[SystemFont],
+    kind: FontKind,
+    lang: diamond_core::Language,
+) -> bool {
+    let id = ui.make_persistent_id(("font-search", key));
+    let query_id = id.with("query");
+    let mut draft = ui
+        .ctx()
+        .data(|data| data.get_temp::<FontSearch>(id))
+        .unwrap_or_default();
+    let display = if choice.path.is_none() {
+        lang.text(if *choice.name == "mono" {
+            "Моноширинный"
+        } else {
+            "По умолчанию"
+        })
+        .to_owned()
+    } else {
+        choice.name.clone()
+    };
+    let first_open = !draft.open;
+    let mut selected = None;
+    let popup = egui::ComboBox::from_id_salt(key)
+        .width(300.0)
+        .selected_text(display)
+        .show_ui(ui, |ui| {
+            if first_open {
+                draft.query.clear();
+                draft.font_count = usize::MAX;
+            }
+            let enter = ui.memory(|memory| memory.has_focus(query_id))
+                && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut draft.query)
+                    .id(query_id)
+                    .desired_width(280.0)
+                    .hint_text(lang.text("Search fonts…")),
+            );
+            if first_open {
+                field.request_focus();
+            }
+            if draft.cached_query != draft.query || draft.font_count != fonts.len() {
+                draft.matches = std::sync::Arc::new(font_matches(
+                    fonts,
+                    &draft.query,
+                    kind == FontKind::Source,
+                ));
+                draft.cached_query.clone_from(&draft.query);
+                draft.font_count = fonts.len();
+            }
+            ui.add_space(6.0);
+            let query = draft.query.trim().to_lowercase();
+            let mut builtin_match = false;
+            for (name, label) in [
+                ("sans", lang.text("По умолчанию")),
+                ("mono", lang.text("Моноширинный")),
+            ] {
+                if (kind == FontKind::Source && name != "mono")
+                    || (kind == FontKind::Interface && name != "sans")
+                {
+                    continue;
+                }
+                if !query.is_empty()
+                    && !name.contains(&query)
+                    && !label.to_lowercase().contains(&query)
+                {
+                    continue;
+                }
+                builtin_match = true;
+                if ui
+                    .selectable_label(choice.path.is_none() && choice.name.as_str() == name, label)
+                    .clicked()
+                    || (enter && selected.is_none())
+                {
+                    selected = Some((name.to_owned(), None, 0));
+                    ui.close();
+                }
+            }
+            egui::ScrollArea::vertical()
+                .id_salt(id.with("results"))
+                .max_height(260.0)
+                .show(ui, |ui| {
+                    for &index in draft.matches.iter().take(100) {
+                        let font = &fonts[index];
+                        if ui
+                            .selectable_label(
+                                choice.path.as_ref() == Some(&font.path)
+                                    && *choice.index == font.index,
+                                &font.name,
+                            )
+                            .clicked()
+                            || (enter && selected.is_none())
+                        {
+                            selected =
+                                Some((font.name.clone(), Some(font.path.clone()), font.index));
+                            ui.close();
+                        }
+                    }
+                    if draft.matches.is_empty() && !builtin_match && !query.is_empty() {
+                        ui.label(lang.text("No matching fonts"));
+                    }
+                });
+        });
+    draft.open = popup.inner.is_some();
+    ui.ctx().data_mut(|data| data.insert_temp(id, draft));
+    if let Some((name, path, index)) = selected {
+        let changed = *choice.name != name || *choice.path != path || *choice.index != index;
+        *choice.name = name;
+        *choice.path = path;
+        *choice.index = index;
+        changed
+    } else {
+        false
     }
 }
 
@@ -160,5 +305,38 @@ fn committed_slider(
         } else {
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod font_search_tests {
+    use super::*;
+    #[test]
+    fn font_query_matches_each_word_and_source_only_offers_monospace_faces() {
+        let fonts = vec![
+            SystemFont {
+                name: "Montserrat · Regular".into(),
+                path: "/fonts/montserrat.ttf".into(),
+                index: 0,
+                monospace: false,
+            },
+            SystemFont {
+                name: "DejaVu Sans Mono · Bold".into(),
+                path: "/fonts/dejavu.ttc".into(),
+                index: 1,
+                monospace: true,
+            },
+            SystemFont {
+                name: "DejaVu Sans Mono · Regular".into(),
+                path: "/fonts/dejavu.ttc".into(),
+                index: 0,
+                monospace: true,
+            },
+        ];
+        assert_eq!(font_matches(&fonts, "monTSerrat", false), vec![0]);
+        assert!(font_matches(&fonts, "Montserrat", true).is_empty());
+        assert_eq!(font_matches(&fonts, "dejavu mono", true), vec![2, 1]);
+        assert_eq!(font_matches(&fonts, "dejavu mono bold", true), vec![1]);
+        assert!(font_matches(&fonts, "unknown", false).is_empty());
     }
 }

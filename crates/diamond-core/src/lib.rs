@@ -24,6 +24,7 @@ pub struct AppSettings {
     pub language: Language,
     pub ui_font: String,
     pub ui_font_path: Option<PathBuf>,
+    pub ui_font_index: u32,
     pub ui_font_size: f32,
     pub last_vault: Option<PathBuf>,
     pub reduced_motion: bool,
@@ -36,6 +37,10 @@ pub struct AppSettings {
     pub accent: [u8; 3],
     pub editor_font: String,
     pub editor_font_path: Option<PathBuf>,
+    pub editor_font_index: u32,
+    pub code_font: String,
+    pub code_font_path: Option<PathBuf>,
+    pub code_font_index: u32,
     pub code_font_size: f32,
     pub editor_width: f32,
     pub word_wrap: bool,
@@ -48,6 +53,7 @@ impl Default for AppSettings {
             language: Language::En,
             ui_font: "sans".into(),
             ui_font_path: None,
+            ui_font_index: 0,
             ui_font_size: 14.0,
             last_vault: None,
             reduced_motion: false,
@@ -60,6 +66,10 @@ impl Default for AppSettings {
             accent: [123, 178, 255],
             editor_font: "sans".into(),
             editor_font_path: None,
+            editor_font_index: 0,
+            code_font: "mono".into(),
+            code_font_path: None,
+            code_font_index: 0,
             code_font_size: 15.0,
             editor_width: 860.0,
             word_wrap: true,
@@ -84,5 +94,8 @@ mod tests {
         assert!(settings.word_wrap);
         assert_eq!(settings.editor_width, 860.0);
         assert!(settings.recent_vaults.is_empty());
+        assert_eq!(settings.code_font, "mono");
+        assert!(settings.code_font_path.is_none());
+        assert_eq!(settings.code_font_index, 0);
     }
 }

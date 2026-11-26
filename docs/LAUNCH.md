@@ -1,9 +1,9 @@
 # Terminal-independent launch
 
 ```sh
-diamond .
-diamond ~/vault_1
-diamond ~/notes/idea.md
+diamond-notes .
+diamond-notes ~/vault_1
+diamond-notes ~/notes/idea.md
 ```
 
 GUI launches start a re-executed child in its own POSIX session. The parent waits
@@ -24,9 +24,9 @@ Use foreground mode for direct diagnostics, debugger sessions or scripts that
 need to wait for the GUI:
 
 ```sh
-diamond --foreground .
+diamond-notes --foreground .
 cargo run --release -p diamond-app -- --foreground .
-DIAMOND_PROFILE=1 diamond --foreground . 2>diamond-profile.log
+DIAMOND_PROFILE=1 diamond-notes --foreground . 2>diamond-profile.log
 ```
 
 DIAMOND_PROFILE=1 also implicitly keeps the foreground behavior for compatibility

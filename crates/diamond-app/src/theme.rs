@@ -139,28 +139,41 @@ pub fn configure(ctx: &Context, settings: &AppSettings) {
 pub struct SystemFont {
     pub name: String,
     pub path: PathBuf,
+    pub index: u32,
+    pub monospace: bool,
 }
-
-pub fn system_fonts() -> Vec<SystemFont> {
-    let Ok(output) = std::process::Command::new("fc-list")
-        .args(["-f", "%{family[0]}\t%{style[0]}\t%{file}\n"])
-        .output()
-    else {
-        return Vec::new();
-    };
-    if !output.status.success() || output.stdout.len() > 2 * 1024 * 1024 {
-        return Vec::new();
-    }
-    let mut fonts: Vec<_> = String::from_utf8_lossy(&output.stdout)
+fn supported_font(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "ttf" | "otf" | "ttc" | "otc"
+            )
+        })
+}
+fn spacing_is_mono(value: &str) -> bool {
+    value
+        .split(',')
+        .any(|part| matches!(part.trim(), "100" | "110"))
+}
+fn parse_system_fonts(value: &str) -> Vec<SystemFont> {
+    let mut fonts: Vec<_> = value
         .lines()
         .filter_map(|line| {
-            let mut parts = line.splitn(3, '\t');
-            let name = parts.next()?;
-            let style = parts.next()?;
-            let path = parts.next()?;
-            (!name.is_empty()).then(|| SystemFont {
-                name: format!("{name} · {style}"),
-                path: PathBuf::from(path),
+            let parts: Vec<_> = line.split('\t').collect();
+            if parts.len() != 5 {
+                return None;
+            }
+            let path = PathBuf::from(parts[2]);
+            if parts[0].is_empty() || !supported_font(&path) {
+                return None;
+            }
+            Some(SystemFont {
+                name: format!("{} · {}", parts[0], parts[1]),
+                path,
+                index: parts[3].parse::<u32>().ok()? & 0xffff,
+                monospace: spacing_is_mono(parts[4]),
             })
         })
         .collect();
@@ -168,27 +181,77 @@ pub fn system_fonts() -> Vec<SystemFont> {
     fonts.dedup_by(|a, b| a.name == b.name);
     fonts
 }
-
-/// Fontconfig discovery happens only when installing preferences, never per frame.
-fn cjk_font() -> Option<(PathBuf, u32)> {
+pub fn system_fonts() -> Vec<SystemFont> {
+    let Ok(output) = std::process::Command::new("fc-list")
+        .args([
+            "-f",
+            "%{family[0]}\t%{style[0]}\t%{file}\t%{index}\t%{spacing}\n",
+        ])
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() || output.stdout.len() > 2 * 1024 * 1024 {
+        return Vec::new();
+    }
+    parse_system_fonts(&String::from_utf8_lossy(&output.stdout))
+}
+fn matched_font(pattern: &str) -> Option<(PathBuf, u32)> {
     let output = std::process::Command::new("fc-match")
-        .args(["-f", "%{lang}\n%{file}\n%{index}\n", ":lang=zh-cn"])
+        .args(["-s", "-f", "%{file}\t%{index}\n", pattern])
         .output()
         .ok()?;
-    if !output.status.success() {
+    if !output.status.success() || output.stdout.len() > 2 * 1024 * 1024 {
         return None;
     }
-    let value = std::str::from_utf8(&output.stdout).ok()?;
-    let mut lines = value.lines();
-    if !lines.next()?.split('|').any(|lang| lang.starts_with("zh")) {
+    std::str::from_utf8(&output.stdout)
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            let (path, index) = line.split_once('\t')?;
+            let path = PathBuf::from(path);
+            supported_font(&path).then_some((path, index.parse::<u32>().ok()? & 0xffff))
+        })
+}
+fn font_properties(path: &std::path::Path, index: u32) -> Option<String> {
+    let output = std::process::Command::new("fc-query")
+        .args([
+            "-i",
+            &index.to_string(),
+            "-f",
+            "%{spacing}\n%{charset}\n",
+            "--",
+        ])
+        .arg(path)
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() || output.stdout.len() > 512 * 1024 {
         return None;
     }
-    Some((PathBuf::from(lines.next()?), lines.next()?.parse().ok()?))
+    String::from_utf8(output.stdout).ok()
+}
+fn has_character(properties: &str, character: u32) -> bool {
+    properties
+        .lines()
+        .nth(1)
+        .unwrap_or("")
+        .split_whitespace()
+        .any(|entry| {
+            let (start, end) = entry.split_once('-').unwrap_or((entry, entry));
+            match (u32::from_str_radix(start, 16), u32::from_str_radix(end, 16)) {
+                (Ok(start), Ok(end)) => start <= character && character <= end,
+                _ => false,
+            }
+        })
 }
 
 fn load_font(path: &std::path::Path, index: u32) -> Option<egui::FontData> {
     use std::io::Read;
     const LIMIT: u64 = 64 * 1024 * 1024;
+    if !supported_font(path) {
+        return None;
+    }
     let mut bytes = Vec::new();
     std::fs::File::open(path)
         .ok()?
@@ -203,38 +266,123 @@ fn load_font(path: &std::path::Path, index: u32) -> Option<egui::FontData> {
     Some(data)
 }
 
+struct FallbackFont {
+    name: String,
+    data: std::sync::Arc<egui::FontData>,
+}
+fn fallbacks() -> &'static Vec<FallbackFont> {
+    static FONTS: std::sync::OnceLock<Vec<FallbackFont>> = std::sync::OnceLock::new();
+    FONTS.get_or_init(|| {
+        let mut result = Vec::new();
+        let mut loaded = Vec::new();
+        let mut bytes = 0;
+        // Fontconfig and file reads run once, never in layout or on keystrokes.
+        for (pattern, character) in [
+            ("monospace:charset=2501", 0x2501),
+            ("sans-serif:charset=2192", 0x2192),
+            ("Noto Sans Symbols 2:charset=23f5", 0x23f5),
+            ("sans-serif:charset=2211", 0x2211),
+            ("sans-serif:lang=zh-cn:charset=4e2d", 0x4e2d),
+            ("sans-serif:charset=627", 0x627),
+            ("sans-serif:charset=905", 0x905),
+        ] {
+            let Some((path, index)) = matched_font(pattern) else {
+                continue;
+            };
+            if loaded.contains(&(path.clone(), index)) {
+                continue;
+            }
+            if !font_properties(&path, index)
+                .is_some_and(|properties| has_character(&properties, character))
+            {
+                continue;
+            }
+            if let Some(data) = load_font(&path, index) {
+                if bytes + data.font.len() > 96 * 1024 * 1024 {
+                    continue;
+                }
+                bytes += data.font.len();
+                let name = format!("diamond-fallback-{}", result.len());
+                result.push(FallbackFont {
+                    name,
+                    data: std::sync::Arc::new(data),
+                });
+                loaded.push((path, index));
+            }
+        }
+        result
+    })
+}
+fn brand_font() -> Option<std::sync::Arc<egui::FontData>> {
+    static FONT: std::sync::OnceLock<Option<std::sync::Arc<egui::FontData>>> =
+        std::sync::OnceLock::new();
+    FONT.get_or_init(|| {
+        let (path, index) = matched_font("Montserrat:style=Bold")?;
+        load_font(&path, index).map(std::sync::Arc::new)
+    })
+    .clone()
+}
 pub fn install_font(ctx: &Context, settings: &AppSettings) -> Option<String> {
     let mut fonts = FontDefinitions::default();
     install_color_emoji();
     let mut error = None;
-    if let Some((path, index)) = cjk_font() {
-        if let Some(data) = load_font(&path, index) {
-            fonts
-                .font_data
-                .insert("diamond-cjk".into(), std::sync::Arc::new(data));
-            for family in fonts.families.values_mut() {
-                family.push("diamond-cjk".into());
+    // Keep both bundled families in each fallback chain, then system coverage.
+    let proportional = fonts.families[&FontFamily::Proportional].clone();
+    let mono = fonts.families[&FontFamily::Monospace].clone();
+    for family in fonts.families.values_mut() {
+        for name in proportional.iter().chain(mono.iter()) {
+            if !family.contains(name) {
+                family.push(name.clone());
             }
         }
-    } else if settings.language == diamond_core::Language::Zh {
-        error=Some(settings.language.text("Chinese glyphs need a system CJK font: install noto-fonts-cjk and restart Diamond.").into());
+        for font in fallbacks() {
+            family.push(font.name.clone());
+        }
     }
-    for (name, path, key) in [
+    for font in fallbacks() {
+        fonts
+            .font_data
+            .insert(font.name.clone(), std::sync::Arc::clone(&font.data));
+    }
+    for (name, path, index, key) in [
         (
             "diamond-editor",
             &settings.editor_font_path,
+            settings.editor_font_index,
             &settings.editor_font,
         ),
-        ("diamond-ui", &settings.ui_font_path, &settings.ui_font),
+        (
+            "diamond-ui",
+            &settings.ui_font_path,
+            settings.ui_font_index,
+            &settings.ui_font,
+        ),
+        (
+            "diamond-code",
+            &settings.code_font_path,
+            settings.code_font_index,
+            &settings.code_font,
+        ),
     ] {
-        let base = if key == "mono" {
+        let base = if name == "diamond-code" || key == "mono" {
             FontFamily::Monospace
         } else {
             FontFamily::Proportional
         };
         let mut family = fonts.families[&base].clone();
         if let Some(path) = path {
-            if let Some(data) = load_font(path, 0) {
+            let allowed = name != "diamond-code"
+                || font_properties(path, index).is_some_and(|properties| {
+                    spacing_is_mono(properties.lines().next().unwrap_or(""))
+                });
+            if !allowed {
+                error = Some(
+                    settings
+                        .language
+                        .text("Source font must be monospaced; using the default font.")
+                        .into(),
+                );
+            } else if let Some(data) = load_font(path, index) {
                 fonts
                     .font_data
                     .insert(name.into(), std::sync::Arc::new(data));
@@ -248,8 +396,21 @@ pub fn install_font(ctx: &Context, settings: &AppSettings) -> Option<String> {
                 );
             }
         }
-        fonts.families.insert(FontFamily::Name(name.into()), family);
+        fonts
+            .families
+            .insert(FontFamily::Name(name.into()), family.clone());
+        if name == "diamond-code" {
+            fonts.families.insert(FontFamily::Monospace, family);
+        }
     }
+    let mut brand = fonts.families[&FontFamily::Proportional].clone();
+    if let Some(data) = brand_font() {
+        fonts.font_data.insert("diamond-brand".into(), data);
+        brand.insert(0, "diamond-brand".into());
+    }
+    fonts
+        .families
+        .insert(FontFamily::Name("diamond-brand".into()), brand);
     ctx.set_fonts(fonts);
     diamond_editor::invalidate_font_layouts(ctx);
     error
@@ -287,4 +448,35 @@ fn install_color_emoji() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod font_tests {
+    use super::*;
+    #[test]
+    fn discovery_keeps_collection_face_and_monospace_metadata() {
+        let input = "Sans\tRegular\t/fonts/sans.ttf\t0\t\nMono\tBold\t/fonts/mono.ttc\t2\t100\nWeb\tRegular\t/fonts/web.woff2\t0\t100\n";
+        let fonts = parse_system_fonts(input);
+        assert_eq!(fonts.len(), 2);
+        let mono = fonts.iter().find(|f| f.name == "Mono · Bold").unwrap();
+        assert!(mono.monospace);
+        assert_eq!(mono.index, 2);
+        assert!(
+            !fonts
+                .iter()
+                .find(|f| f.name == "Sans · Regular")
+                .unwrap()
+                .monospace
+        );
+    }
+    #[test]
+    fn fallback_coverage_checks_actual_fontconfig_ranges() {
+        assert!(has_character("100\n20-7e 2500-259f\n", 0x2501));
+        assert!(!has_character("100\n20-7e 2500\n", 0x2501));
+        assert!(spacing_is_mono("100"));
+        assert!(spacing_is_mono("110"));
+        assert!(!spacing_is_mono("90"));
+        assert!(!spacing_is_mono(""));
+        assert!(!supported_font(std::path::Path::new("/font.woff2")));
+    }
 }

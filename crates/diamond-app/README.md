@@ -70,3 +70,35 @@ A startup socket confirms setsid before the parent returns. Relative OS paths
 and cwd are preserved; output appends to XDG_STATE_HOME/diamond/diamond.log.
 --foreground and DIAMOND_PROFILE=1 retain direct diagnostics. Informational CLI
 commands never detach. See docs/LAUNCH.md; native terminal tests remain pending.
+
+
+## 0.7.11 fonts, header and Arch package identity
+
+UI/Live/Source font selectors include a focused text search inside the dropdown.
+Matching choices update on each letter; only selecting a face or pressing Enter
+commits a font. Search result indices are cached between query/list changes.
+Source exposes only Fontconfig MONO/CHARCELL faces and always uses the Monospace
+family, independently of the Live font. Preferences retain collection indices;
+missing fields in older settings default to built-in monospace for Source.
+
+Font families retain bundled fallback faces and add cached system fallback faces
+for box drawing, symbols, CJK, Arabic and Devanagari. Actual charset coverage is
+checked before adding each system face. Fontconfig discovery/file reads happen
+on font installation, not typing/layout. System fallbacks are cached once and
+bounded to 96 MiB; unsupported WOFF/WOFF2 paths are excluded. This is a finite
+family chain, not a guarantee of every Unicode glyph when no loaded face covers
+it. The Arch package includes Fontconfig/DejaVu; CJK/color fonts remain optional.
+
+The header now shows a tracked uppercase DIAMOND wordmark, with a dedicated bold
+system face when available and no Personal workspace subtitle. The diamond is
+back at the left corner. Left-panel toggle is at the top of the activity rail;
+both panel toggles use only gray colors in all hover/focus/open/pressed states.
+The SVG override tip is removed from settings and translations.
+
+Arch package and installed executable are diamond-notes; Cargo still builds
+ target/release/diamond. The launcher uses diamond-notes and the same stable app
+ID/icon. Generic diamond binary/icon paths are not installed, and no provides,
+replaces or conflicts claim is made against the unrelated diamond package.
+If an older package of this editor was installed under diamond, remove that old
+editor package before installing the renamed package; see packaging/README.md.
+Rust build/tests/native rendering and font-picker focus remain unverified here.

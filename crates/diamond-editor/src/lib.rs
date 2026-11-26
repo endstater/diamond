@@ -681,7 +681,11 @@ impl EditorBuffer {
         }
         let accent = ui.visuals().hyperlink_color;
         let viewport_height = ui.available_height().max(font_size * 2.0);
-        let family = self.font_family.clone();
+        let family = if self.mode == EditorMode::Formatted {
+            self.font_family.clone()
+        } else {
+            egui::FontFamily::Monospace
+        };
         let raw_ime = if self.mode != EditorMode::Formatted {
             let events = ui.input(|input| {
                 let mut flags = (false, false, false);
